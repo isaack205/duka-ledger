@@ -8,8 +8,12 @@ class SupabaseConnector {
   }
 
   async fetchCredentials() {
-    const { data: { session } } = await this.supabase.auth.getSession();
-    if (!session) return null;
+    const { data: { session }, error } = await this.supabase.auth.getSession();
+    if (error || !session) {
+      console.warn("PowerSync connector: No active Supabase session found.");
+      return null;
+    }
+    
     return {
       endpoint: import.meta.env.VITE_POWERSYNC_URL,
       token: session.access_token,
@@ -37,7 +41,7 @@ class SupabaseConnector {
           if (error) throw error;
         }
       }
-      await database.completeCrudTransaction(transaction.writeCheckpoint);
+      await transaction.complete();
     } catch (error) {
       console.error('Offline upload transaction failed, retrying later:', error);
       throw error;
@@ -45,22 +49,11 @@ class SupabaseConnector {
   }
 }
 
-// Keep a single private database reference
-let dbInstance = null;
+export const db = new PowerSyncDatabase({
+  schema: AppSchema,
+  database: new WASQLiteOpenFactory({
+    dbFilename: 'duka_ledger.db'
+  })
+});
 
-export function getDatabaseInstance() {
-  if (dbInstance) return dbInstance;
-
-  // Initialize dynamically on demand
-  dbInstance = new PowerSyncDatabase({
-    schema: AppSchema,
-    database: new WASQLiteOpenFactory({
-      dbFilename: 'duka_ledger.db'
-    })
-  });
-
-  const connector = new SupabaseConnector();
-  dbInstance.connect(connector);
-
-  return dbInstance;
-}
+export const connector = new SupabaseConnector();

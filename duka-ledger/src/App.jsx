@@ -1,110 +1,205 @@
-import { useState, useMemo } from 'react';
-import { PowerSyncContext } from '@powersync/react';
-import { getDatabaseInstance } from './powersync/SetupPowerSync'; // 🟢 Import the helper function
-import { supabase } from './supabase/supabaseClient';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { SyncIndicator } from './components/SyncIndicator';
-import './App.css';
+// import { useState, useEffect } from 'react';
+// import { PowerSyncContext } from '@powersync/react';
+// import { db, connector } from './powersync/SetupPowerSync';
+// import { supabase } from './supabase/supabaseClient';
+// import { AuthProvider, useAuth } from './context/AuthContext';
+// import { SyncIndicator } from './components/SyncIndicator';
+// import { CatalogManager } from './features/CatalogManager';
+// import { CustomerLedger } from './features/ledger/CustomLedger';
+// import { SupplierLedger } from './features/ledger/SupplierLedger';
+// import { DailyCheckout } from './features/ledger/DailyCheckout';
+// import './App.css';
 
-function MainAppContent() {
-  const { user } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [loading, setLoading] = useState(false);
+// function MainAppContent() {
+//   const { user } = useAuth();
+//   const [email, setEmail] = useState('');
+//   const [password, setPassword] = useState('');
+//   const [authError, setAuthError] = useState('');
+//   const [loading, setLoading] = useState(false);
 
-  const handleSignIn = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setAuthError('');
+//   const handleSignIn = async (e) => {
+//     e.preventDefault();
+//     setLoading(true);
+//     setAuthError('');
     
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
-    } catch (err) {
-      setAuthError(err.message || 'Failed to sign in');
-    } finally {
-      setLoading(false);
-    }
-  };
+//     try {
+//       const { error } = await supabase.auth.signInWithPassword({
+//         email,
+//         password,
+//       });
+//       if (error) throw error;
+//     } catch (err) {
+//       setAuthError(err.message || 'Failed to sign in');
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
 
-  if (!user) {
-    return (
-      <div className="auth-container" style={{ maxWidth: '400px', margin: '100px auto', padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
-        <h2>DukaLedger Login</h2>
-        <p>Please sign in to access the shop registry.</p>
+//   if (!user) {
+//     return (
+//       <div className="auth-container max-w-sm mx-auto mt-24 p-6 border border-gray-200 rounded-lg bg-white shadow-sm">
+//         <h2 className="text-xl font-bold text-gray-800 mb-2">DukaLedger Login</h2>
+//         <p className="text-sm text-gray-500 mb-6">Please sign in to access the shop registry.</p>
         
-        <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label htmlFor="email">Email Address</label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter your email"
-              required
-              style={{ padding: '8px', fontSize: '16px' }}
-            />
-          </div>
+//         <form onSubmit={handleSignIn} className="flex flex-col gap-4">
+//           <div className="flex flex-col gap-1">
+//             <label className="text-xs font-semibold text-gray-600" htmlFor="email">Email Address</label>
+//             <input
+//               id="email"
+//               type="email"
+//               value={email}
+//               onChange={(e) => setEmail(e.target.value)}
+//               placeholder="Enter your email"
+//               required
+//               className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+//             />
+//           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label htmlFor="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              required
-              style={{ padding: '8px', fontSize: '16px' }}
-            />
-          </div>
+//           <div className="flex flex-col gap-1">
+//             <label className="text-xs font-semibold text-gray-600" htmlFor="password">Password</label>
+//             <input
+//               id="password"
+//               type="password"
+//               value={password}
+//               onChange={(e) => setPassword(e.target.value)}
+//               placeholder="Enter your password"
+//               required
+//               className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+//             />
+//           </div>
 
-          {authError && <p style={{ color: 'red', margin: '0', fontSize: '14px' }}>{authError}</p>}
+//           {authError && <p className="text-red-500 text-xs">{authError}</p>}
 
-          <button 
-            type="submit" 
-            disabled={loading}
-            style={{ padding: '10px', fontSize: '16px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
+//           <button 
+//             type="submit" 
+//             disabled={loading}
+//             className="w-full py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+//           >
+//             {loading ? 'Signing in...' : 'Sign In'}
+//           </button>
+//         </form>
+//       </div>
+//     );
+//   }
+
+//   return (
+//     <div className="min-h-screen bg-gray-50">
+//       <header className="flex justify-between items-center px-6 py-4 bg-white border-b border-gray-200">
+//         <h1 className="text-xl font-bold text-gray-800">DukaLedger</h1>
+//         <div className="flex items-center gap-4">
+//           <SyncIndicator />
+//           <button 
+//             onClick={() => supabase.auth.signOut()}
+//             className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 transition"
+//           >
+//             Sign Out
+//           </button>
+//         </div>
+//       </header>
+      
+//       <main className="max-w-6xl mx-auto p-6">
+//         <p className="text-gray-600 mb-4">Welcome back, <span className="font-semibold">{user.email}</span>!</p>
+//         <CatalogManager />
+//         <CustomerLedger />
+//         <SupplierLedger />
+//         <DailyCheckout />
+//       </main>
+//     </div>
+//   );
+// }
+
+// export default function App() {
+//   const [initialized, setInitialized] = useState(false);
+
+//   useEffect(() => {
+//     async function initDb() {
+//       try {
+//         await db.init();
+//         await db.connect(connector);
+//         setInitialized(true);
+//       } catch (error) {
+//         console.error('Failed to initialize PowerSync client:', error);
+//       }
+//     }
+//     initDb();
+//   }, []);
+
+//   if (!initialized) {
+//     return (
+//       <div className="flex items-center justify-center min-h-screen bg-gray-50">
+//         <p className="text-gray-500 text-sm">Loading offline store...</p>
+//       </div>
+//     );
+//   }
+
+//   return (
+//     <AuthProvider>
+//       <PowerSyncContext.Provider value={db}>
+//         <MainAppContent />
+//       </PowerSyncContext.Provider>
+//     </AuthProvider>
+//   );
+// }
+
+import { useState, useEffect } from 'react';
+import { PowerSyncContext } from '@powersync/react';
+import { Route, Routes, Navigate } from 'react-router-dom';
+import { db, connector } from './powersync/SetupPowerSync';
+import { AuthProvider } from './context/AuthContext';
+
+import Layout from './components/common/Layout';
+import ProtectedRoute from './components/ProtectedRoute';
+
+import LoginPage from './pages/LoginPage';
+import { DashboardOverview } from './features/dashboard/DashboardOverview';
+import { CustomerLedger } from './features/ledger/CustomerLedger';
+import { SupplierLedger } from './features/ledger/SupplierLedger';
+import { DailyCheckout } from './features/ledger/DailyCheckout';
+
+export default function App() {
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    async function initDb() {
+      try {
+        await db.init();
+        await db.connect(connector);
+        setInitialized(true);
+      } catch (error) {
+        console.error('Failed to initialize PowerSync client:', error);
+      }
+    }
+    initDb();
+  }, []);
+
+  if (!initialized) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <p className="text-gray-500 text-sm font-semibold tracking-wide">Loading offline store...</p>
       </div>
     );
   }
 
   return (
-    <div className="dashboard-container">
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', background: '#f5f5f5' }}>
-        <h1>DukaLedger</h1>
-        <SyncIndicator />
-        <button 
-          onClick={() => supabase.auth.signOut()}
-          style={{ padding: '5px 10px', cursor: 'pointer' }}
-        >
-          Sign Out
-        </button>
-      </header>
-      
-      <main style={{ padding: '20px' }}>
-        <p>Welcome back, {user.email}! Let's start serving customers.</p>
-      </main>
-    </div>
-  );
-}
-
-export default function App() {
-  const db = useMemo(() => getDatabaseInstance(), []);
-
-  return (
     <AuthProvider>
       <PowerSyncContext.Provider value={db}>
-        <MainAppContent />
+        <Routes>
+          {/* ROOT REDIRECTS */}
+          <Route path="/" element={<Navigate to="/home" replace />} />
+
+          {/* AUTHENTICATION ROUTES */}
+          <Route path="/login" element={<LoginPage />} />
+
+          {/* MAIN PLATFORM ROUTES */}
+          <Route element={<Layout />}>
+            <Route element={<ProtectedRoute />}>
+              <Route path="/home" element={<DashboardOverview />} />
+              <Route path="/customers" element={<CustomerLedger />} />
+              <Route path="/suppliers" element={<SupplierLedger />} />
+              <Route path="/checkout" element={<DailyCheckout />} />
+            </Route>
+          </Route>
+        </Routes>
       </PowerSyncContext.Provider>
     </AuthProvider>
   );

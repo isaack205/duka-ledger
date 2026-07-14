@@ -13,8 +13,11 @@
     "@powersync/react": "^1.10.0",
     "@powersync/web": "^1.39.0",
     "@supabase/supabase-js": "^2.110.3",
+    "@tailwindcss/vite": "^4.3.2",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.1",
+    "tailwindcss": "^4.3.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
