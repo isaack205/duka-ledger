@@ -1,7 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@powersync/react';
 import { db } from '../../powersync/SetupPowerSync';
 import { supabase } from '../../supabase/supabaseClient';
+import { getCustomerSummaryData, normalizeQueryRows } from './customerLedgerUtils';
+import CustomerInvoicePrint from './CustomerInvoicePrint';
+
+// Reusable CSV generator helper function
+const exportToCSV = (filename, headers, dataRows) => {
+  const csvContent = [
+    headers.join(','),
+    ...dataRows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+  ].join('\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `${filename}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
 
 export function CustomerLedger() {
   const { data: items } = useQuery('SELECT * FROM items ORDER BY item_name ASC');
@@ -11,6 +31,9 @@ export function CustomerLedger() {
     LEFT JOIN items ON customer_ledgers.item_id = items.id
     ORDER BY customer_ledgers.created_at ASC
   `);
+
+  const itemRows = normalizeQueryRows(items);
+  const transactionRows = normalizeQueryRows(transactions);
 
   // Active user action states
   const [activeModal, setActiveModal] = useState(null); // 'sheet', 'debt', or 'repayment'
@@ -29,11 +52,12 @@ export function CustomerLedger() {
   const [upfrontPayment, setUpfrontPayment] = useState('');
   const [repaymentAmount, setRepaymentAmount] = useState('');
   const [notes, setNotes] = useState('');
+  const [printInvoiceData, setPrintInvoiceData] = useState(null);
 
   // Cart operations
   const handleAddToCart = () => {
     if (!selectedItemId) return;
-    const item = items.find(i => i.id === selectedItemId);
+    const item = itemRows.find(i => i.id === selectedItemId);
     if (!item) return;
 
     const existingIndex = cart.findIndex(c => c.id === item.id);
@@ -52,46 +76,12 @@ export function CustomerLedger() {
   const upfront = parseFloat(upfrontPayment) || 0;
   const netDebt = totalCartValue - upfront;
 
-  // Process data for a customer using the FIFO waterfall logic
-  const getCustomerSummaryData = (name) => {
-    const customerTx = (transactions || []).filter(t => t.customer_name === name);
-    
-    const debts = customerTx.filter(t => t.transaction_type === 'debt').map(d => ({ ...d, remaining: parseFloat(d.net_debt_amount) }));
-    const repayments = customerTx.filter(t => t.transaction_type === 'repayment');
-
-    const totalDebt = debts.reduce((sum, d) => sum + parseFloat(d.net_debt_amount), 0);
-    const totalRepayed = repayments.reduce((sum, r) => sum + Math.abs(parseFloat(r.net_debt_amount)), 0);
-    const remainingDebt = Math.max(0, totalDebt - totalRepayed);
-
-    let repaymentPool = totalRepayed;
-    const processedDebts = debts.map(debt => {
-      let remaining = debt.remaining;
-      if (repaymentPool > 0) {
-        if (repaymentPool >= remaining) {
-          repaymentPool -= remaining;
-          remaining = 0;
-        } else {
-          remaining -= repaymentPool;
-          repaymentPool = 0;
-        }
-      }
-      return { ...debt, remainingBalance: remaining, isCleared: remaining === 0 };
-    });
-
-    const historyTimeline = [
-      ...processedDebts.map(d => ({ ...d, displayType: 'debt' })),
-      ...repayments.map(r => ({ ...r, displayType: 'repayment' }))
-    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); // Newest first for popups
-
-    return { totalDebt, totalRepayed, remainingDebt, timeline: historyTimeline, phone: customerTx[0]?.customer_phone || '' };
-  };
-
   // Unique list of customers
-  const uniqueCustomers = [...new Set((transactions || []).map(t => t.customer_name))];
+  const uniqueCustomers = [...new Set(transactionRows.map(t => t.customer_name))];
 
   // Split customers into Active (unpaid debt) and Closed (fully cleared)
-  const activeDebtors = uniqueCustomers.filter(name => getCustomerSummaryData(name).remainingDebt > 0);
-  const closedDebtors = uniqueCustomers.filter(name => getCustomerSummaryData(name).remainingDebt === 0);
+  const activeDebtors = uniqueCustomers.filter(name => getCustomerSummaryData(transactionRows, name).remainingDebt > 0);
+  const closedDebtors = uniqueCustomers.filter(name => getCustomerSummaryData(transactionRows, name).remainingDebt === 0);
 
   // Add completely new customer debt record
   const handleRegisterNewCustomer = async (e) => {
@@ -169,7 +159,7 @@ export function CustomerLedger() {
   const handleRecordRepayment = async (e) => {
     e.preventDefault();
     const payment = parseFloat(repaymentAmount);
-    const summary = getCustomerSummaryData(modalCustomer);
+    const summary = getCustomerSummaryData(transactionRows, modalCustomer);
 
     // Hard limit verification
     if (payment > summary.remainingDebt) {
@@ -216,15 +206,116 @@ export function CustomerLedger() {
   };
 
   const openActionModal = (type, name) => {
-    const data = getCustomerSummaryData(name);
+    const data = getCustomerSummaryData(transactionRows, name);
     setModalCustomer(name);
     setCustomerPhone(data.phone);
     setActiveModal(type);
     setActiveDropdown(null);
   };
 
+  const handleExportCSV = (customerName, transactions) => {
+    const headers = ['Date', 'Type', 'Amount (KES)', 'Upfront (KES)', 'Notes'];
+    
+    const rows = (transactions || []).map(t => [
+      new Date(t.created_at).toLocaleDateString(),
+      t.transaction_type.toUpperCase(),
+      t.net_debt_amount,
+      t.amount_paid_upfront || '0.00',
+      t.notes || ''
+    ]);
+    
+    exportToCSV(`${customerName.replace(/\s+/g, '_')}_Statement`, headers, rows);
+  };
+
+  const handlePrintPDF = () => {
+    if (!modalCustomer) return;
+
+    const summary = getCustomerSummaryData(transactionRows, modalCustomer);
+    const invoiceLines = summary.timeline;
+
+    setPrintInvoiceData({
+      customerName: modalCustomer,
+      customerPhone,
+      invoiceNumber: `INV-${new Date().getFullYear()}-${String(invoiceLines.length).padStart(3, '0')}`,
+      invoiceDate: new Date().toLocaleDateString(),
+      businessName: 'DukaLedger',
+      businessTagline: 'Customer credit invoice statement',
+      customerLabel: 'Generated from the active ledger modal',
+      referenceNote: notes?.trim() || 'Printed from the customer ledger modal.',
+      summary,
+      timeline: invoiceLines,
+      footerNote: 'Thank you for your business. Please keep this invoice for your records.'
+    });
+  };
+
+  useEffect(() => {
+    if (!printInvoiceData) return;
+
+    const timer = window.setTimeout(() => {
+      window.print();
+      window.setTimeout(() => setPrintInvoiceData(null), 250);
+    }, 50);
+
+    return () => window.clearTimeout(timer);
+  }, [printInvoiceData]);
+
   return (
-    <div className="space-y-8 mt-6 pb-12">
+    <div className="ledger-page space-y-8 mt-6 pb-12">
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+
+          .ledger-print-area,
+          .ledger-print-area *,
+          .ledger-invoice-print-root,
+          .ledger-invoice-print-root * {
+            visibility: visible;
+          }
+
+          .ledger-print-area {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+          }
+
+          .ledger-invoice-print-root {
+            position: fixed;
+            inset: 0;
+            background: #fff;
+            padding: 18px;
+          }
+
+          .ledger-invoice-print-shell {
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+          }
+
+          .ledger-print-card {
+            position: relative;
+            inset: 0;
+            max-width: none !important;
+            max-height: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+
+          .ledger-screen-only {
+            display: none !important;
+          }
+
+          .ledger-invoice-print-shell,
+          .ledger-invoice-print-shell * {
+            color: #0f172a !important;
+          }
+        }
+      `}</style>
       
       {/* SECTION 1: REGISTER NEW CUSTOMER WITH DEBT */}
       <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
@@ -316,7 +407,7 @@ export function CustomerLedger() {
           <p className="text-xs text-gray-500">Unresolved profiles with unpaid debt balances</p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-gray-600 min-w-[600px]">
+          <table className="min-w-150 w-full text-left text-sm text-gray-600">
             <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
               <tr>
                 <th className="py-3.5 px-4">Customer Name</th>
@@ -328,7 +419,7 @@ export function CustomerLedger() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {activeDebtors.map((name) => {
-                const summary = getCustomerSummaryData(name);
+                const summary = getCustomerSummaryData(transactionRows, name);
                 return (
                   <tr key={name} className="hover:bg-gray-50/80 transition cursor-pointer" onClick={() => openActionModal('sheet', name)}>
                     <td className="py-4 px-4 font-semibold text-gray-900">
@@ -380,7 +471,7 @@ export function CustomerLedger() {
           <p className="text-xs text-gray-400">Fully cleared debt logs locked for audit history</p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-gray-400 min-w-[600px]">
+          <table className="min-w-150 w-full text-left text-sm text-gray-400">
             <thead className="bg-gray-50 text-gray-400 font-medium border-b border-gray-200">
               <tr>
                 <th className="py-3.5 px-4">Customer Name</th>
@@ -392,7 +483,7 @@ export function CustomerLedger() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {closedDebtors.map((name) => {
-                const summary = getCustomerSummaryData(name);
+                const summary = getCustomerSummaryData(transactionRows, name);
                 return (
                   <tr key={name} className="hover:bg-gray-50/50 transition cursor-pointer" onClick={() => openActionModal('sheet', name)}>
                     <td className="py-4 px-4 font-semibold text-gray-600">
@@ -429,8 +520,8 @@ export function CustomerLedger() {
 
       {/* MODAL OVERLAYS */}
       {activeModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="ledger-print-area fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="ledger-print-card bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             
             {/* Modal Header */}
             <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
@@ -438,7 +529,7 @@ export function CustomerLedger() {
                 <h3 className="text-lg font-bold text-gray-900">{modalCustomer}'s Sheet</h3>
                 <p className="text-xs text-gray-500">Record History Ledger</p>
               </div>
-              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 text-xl font-bold p-1">×</button>
+              <button onClick={closeModal} className="ledger-screen-only text-gray-400 hover:text-gray-600 text-xl font-bold p-1">×</button>
             </div>
 
             {/* Modal Body */}
@@ -446,49 +537,7 @@ export function CustomerLedger() {
               
               {/* VIEW TIMELINE SHEET */}
               {activeModal === 'sheet' && (
-                <div className="space-y-4">
-                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg flex justify-between items-center text-sm">
-                    <div>
-                      <span className="text-xs text-gray-400 block font-medium">Accumulated Purchases</span>
-                      <strong className="text-gray-800 text-base">{getCustomerSummaryData(modalCustomer).totalDebt.toFixed(2)} KES</strong>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs text-gray-400 block font-medium">Active Owed Balance</span>
-                      <strong className="text-red-600 text-base">{getCustomerSummaryData(modalCustomer).remainingDebt.toFixed(2)} KES</strong>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 mt-4">
-                    {getCustomerSummaryData(modalCustomer).timeline.map((line) => {
-                      const isDebt = line.displayType === 'debt';
-                      return (
-                        <div key={line.id} className={`p-4 rounded-lg border text-xs ${!isDebt ? 'bg-green-50/40 border-green-100' : line.isCleared ? 'bg-gray-50/60 border-gray-100 opacity-60' : 'bg-red-50/40 border-red-100'}`}>
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${!isDebt ? 'bg-green-100 text-green-800' : line.isCleared ? 'bg-gray-200 text-gray-600' : 'bg-red-100 text-red-800'}`}>
-                                  {isDebt ? (line.isCleared ? 'Cleared' : 'Active Debt') : 'Repayment Log'}
-                                </span>
-                                <span className="text-[10px] text-gray-400">{new Date(line.created_at).toLocaleString()}</span>
-                              </div>
-                              <p className="text-sm font-medium text-gray-800 mt-2">{line.notes}</p>
-                            </div>
-                            <div className="text-right">
-                              {isDebt ? (
-                                <>
-                                  <div className="text-gray-400 text-[10px]">Debt: +{parseFloat(line.net_debt_amount).toFixed(2)}</div>
-                                  <div className={`font-bold ${line.isCleared ? 'text-gray-400 line-through' : 'text-red-600'}`}>Owed: {line.remainingBalance.toFixed(2)} KES</div>
-                                </>
-                              ) : (
-                                <div className="font-bold text-green-600">Paid: {line.net_debt_amount} KES</div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                <CustomerInvoicePrint customerName={modalCustomer} transactions={transactionRows} />
               )}
 
               {/* ADD DEBT FORM */}
@@ -562,13 +611,13 @@ export function CustomerLedger() {
                 <form onSubmit={handleRecordRepayment} className="space-y-4">
                   <div>
                     <label className="text-xs font-bold text-gray-400 block mb-1">
-                      Max Allowed Repayment: {getCustomerSummaryData(modalCustomer).remainingDebt.toFixed(2)} KES
+                      Max Allowed Repayment: {getCustomerSummaryData(transactionRows, modalCustomer).remainingDebt.toFixed(2)} KES
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       min="0.01"
-                      max={getCustomerSummaryData(modalCustomer).remainingDebt}
+                      max={getCustomerSummaryData(transactionRows, modalCustomer).remainingDebt}
                       placeholder="Repayment Cash Amount Received"
                       value={repaymentAmount}
                       onChange={(e) => setRepaymentAmount(e.target.value)}
@@ -587,11 +636,35 @@ export function CustomerLedger() {
                   </button>
                 </form>
               )}
-
+              
+              {/* Action Button Strip */}
+              <div className="ledger-screen-only flex gap-2 mt-4 pt-4 border-t border-gray-150">
+                <button
+                  onClick={() => handleExportCSV(modalCustomer, getCustomerSummaryData(transactionRows, modalCustomer).timeline)}
+                  className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold transition flex items-center justify-center gap-1"
+                >
+                  📊 Download CSV
+                </button>
+                <button
+                  onClick={handlePrintPDF}
+                  className="flex-1 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded text-xs font-bold transition flex items-center justify-center gap-1"
+                >
+                  🖨️ Print PDF
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      {printInvoiceData && (
+        <div className="ledger-invoice-print-root fixed inset-0 z-60 bg-white p-0">
+          <div className="ledger-invoice-print-shell">
+            <CustomerInvoicePrint invoiceData={printInvoiceData} />
+          </div>
+        </div>
+      )}
+      
 
     </div>
   );

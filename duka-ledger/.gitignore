@@ -28,3 +28,4 @@ dist-ssr
 
 # SQL Files
 src/supabase/schema.sql
+src/supabase/*.pdf
