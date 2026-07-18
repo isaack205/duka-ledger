@@ -12,7 +12,7 @@ export default defineConfig({
       injectRegister: 'inline',
       workbox: {
         // Cache all static assets (JS, CSS, HTML, local SQLite database files)
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest,wasm}'],
         
         // Fixes endless offline loading: Increase file size cache limit to 5MB
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
