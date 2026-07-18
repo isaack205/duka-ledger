@@ -1,8 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite'
+import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
-
 
 export default defineConfig({
   plugins: [
@@ -14,10 +13,16 @@ export default defineConfig({
       workbox: {
         // Cache all static assets (JS, CSS, HTML, local SQLite database files)
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
+        
+        // Fixes endless offline loading: Increase file size cache limit to 5MB
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        
         // Ensure PowerSync schema/DB setup scripts are always available offline
         navigateFallback: '/index.html',
-        // ALLOW root navigation when completely offline
-        navigateFallbackAllowlist: [/^\/$/],
+        
+        // Fixes offline refresh/cold boot loops: Match any sub-route without a file extension
+        navigateFallbackAllowlist: [/[^\/\.]+/],
+        
         // Prevent cold boots from waiting on old network workers
         clientsClaim: true,
         skipWaiting: true
@@ -26,8 +31,8 @@ export default defineConfig({
         name: 'NeemaGen Shop Digital Ledger',
         short_name: 'NeemaGen Ledger',
         description: 'Offline-first retail ledger and cash checkout manager',
-        theme_color: '#0f172a', // Slate 900 matching your sidebar
-        background_color: '#f8fafc', // Slate 50 matching your body background
+        theme_color: '#0f172a', 
+        background_color: '#f8fafc', 
         display: 'standalone',
         orientation: 'portrait-primary',
         start_url: '/',
