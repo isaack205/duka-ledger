@@ -1,9 +1,7 @@
 {
-  "cleanUrls": true,
-  "trailingSlash": false,
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/|pwa-|_next/|.*\\..*$).*)",
       "destination": "/index.html"
     }
   ]
