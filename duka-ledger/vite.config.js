@@ -13,9 +13,14 @@ export default defineConfig({
       injectRegister: 'inline',
       workbox: {
         // Cache all static assets (JS, CSS, HTML, local SQLite database files)
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
         // Ensure PowerSync schema/DB setup scripts are always available offline
-        navigateFallback: '/index.html'
+        navigateFallback: '/index.html',
+        // ALLOW root navigation when completely offline
+        navigateFallbackAllowlist: [/^\/$/],
+        // Prevent cold boots from waiting on old network workers
+        clientsClaim: true,
+        skipWaiting: true
       },
       manifest: {
         name: 'NeemaGen Shop Digital Ledger',
