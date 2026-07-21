@@ -19,7 +19,9 @@ export default function Layout() {
   // Monitor active user auth session dynamically from Supabase
   useEffect(() => {
     async function fetchUserSession() {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      
       if (user) {
         const displayName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
         const initial = displayName.substring(0, 2).toUpperCase();
