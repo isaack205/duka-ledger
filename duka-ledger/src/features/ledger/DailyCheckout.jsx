@@ -45,6 +45,7 @@ export function DailyCheckout() {
   `);
 
   const [cashCollected, setCashCollected] = useState('');
+  const [mpesaCollected, setMpesaCollected] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedCheckout, setSelectedCheckout] = useState(null);
   const [isEditingToday, setIsEditingToday] = useState(false);
@@ -110,7 +111,13 @@ export function DailyCheckout() {
       return;
     }
 
-    const calculatedNetPosition = cash - supplierDebtNotPaidToday;
+    const mpesa = parseFloat(mpesaCollected || '0');
+    if (isNaN(mpesa) || mpesa < 0) {
+      toast.error('Validation Error', 'Please enter a valid M-Pesa amount.');
+      return;
+    }
+
+    const calculatedNetPosition = cash + mpesa - supplierDebtNotPaidToday;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -119,6 +126,7 @@ export function DailyCheckout() {
         await db.execute(
           `UPDATE daily_checkouts 
            SET total_cash_collected = ?, 
+               total_mpesa_collected = ?,
                customer_credit_issued = ?, 
                supplier_debt_created = ?, 
                net_cash_position = ?, 
@@ -128,6 +136,7 @@ export function DailyCheckout() {
            WHERE id = ?`,
           [
             cash.toFixed(2),
+            mpesa.toFixed(2),
             customerDebtNotPaidToday.toFixed(2),
             supplierDebtNotPaidToday.toFixed(2),
             calculatedNetPosition.toFixed(2),
@@ -148,7 +157,7 @@ export function DailyCheckout() {
           [
             crypto.randomUUID(),
             cash.toFixed(2),
-            '0.00',
+            mpesa.toFixed(2),
             customerDebtNotPaidToday.toFixed(2),
             supplierDebtNotPaidToday.toFixed(2),
             calculatedNetPosition.toFixed(2),
@@ -162,6 +171,7 @@ export function DailyCheckout() {
       }
 
       setCashCollected('');
+      setMpesaCollected('');
       setNotes('');
     } catch (err) {
       console.error(err);
@@ -172,6 +182,7 @@ export function DailyCheckout() {
   const handleTriggerEdit = (e, checkout) => {
     e.stopPropagation();
     setCashCollected(parseFloat(checkout.total_cash_collected).toString());
+    setMpesaCollected(parseFloat(checkout.total_mpesa_collected || 0).toString());
     setNotes(checkout.notes || '');
     setIsEditingToday(true);
   };
@@ -205,6 +216,10 @@ export function DailyCheckout() {
               <div className="flex justify-between text-slate-600">
                 <span>Cash Counted:</span>
                 <strong className="text-primary">{parseFloat(todaysCheckout.total_cash_collected).toFixed(2)} KES</strong>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>M-Pesa Collected:</span>
+                <strong className="text-secondary-dark">{parseFloat(todaysCheckout.total_mpesa_collected || 0).toFixed(2)} KES</strong>
               </div>
             </div>
             <button 
@@ -253,14 +268,18 @@ export function DailyCheckout() {
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1 flex justify-between">
                   <span>M-Pesa Collected</span>
-                  <span className="text-[9px] text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/50">Disabled</span>
                 </label>
-                <input
-                  type="text"
-                  value="M-Pesa payments inactive on frontend"
-                  disabled
-                  className="w-full px-3 py-2.5 border border-slate-100 bg-slate-50 text-slate-400 rounded-xl text-xs cursor-not-allowed font-medium"
-                />
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 text-xs font-bold">KES</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="e.g., 12000.00"
+                    value={mpesaCollected}
+                    onChange={(e) => setMpesaCollected(e.target.value)}
+                    className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+                  />
+                </div>
               </div>
 
               <div>
@@ -298,6 +317,7 @@ export function DailyCheckout() {
               <tr>
                 <th className="py-3.5 px-4 rounded-l-xl">Checkout Date</th>
                 <th className="py-3.5 px-4 text-right">Physical Cash</th>
+                <th className="py-3.5 px-4 text-right">M-Pesa</th>
                 <th className="py-3.5 px-4 text-right">Credit Issued</th>
                 <th className="py-3.5 px-4 text-right">Supplier Debts</th>
                 <th className="py-3.5 px-4 text-right">Net Position</th>
@@ -315,6 +335,7 @@ export function DailyCheckout() {
                   >
                     <td className="py-3.5 px-4 text-primary font-bold">{co.checkout_date}</td>
                     <td className="py-3.5 px-4 text-right text-slate-800">{parseFloat(co.total_cash_collected).toFixed(2)}</td>
+                    <td className="py-3.5 px-4 text-right text-secondary-dark">{parseFloat(co.total_mpesa_collected || 0).toFixed(2)}</td>
                     <td className="py-3.5 px-4 text-right text-accent">{parseFloat(co.customer_credit_issued || 0).toFixed(2)}</td>
                     <td className="py-3.5 px-4 text-right text-amber-600">{parseFloat(co.supplier_debt_created || 0).toFixed(2)}</td>
                     <td className="py-3.5 px-4 text-right">
@@ -335,7 +356,7 @@ export function DailyCheckout() {
               })}
               {(!pastCheckouts || pastCheckouts.length === 0) && (
                 <tr>
-                  <td colSpan="6" className="py-12 text-center text-slate-500 text-xs font-semibold">
+                  <td colSpan="7" className="py-12 text-center text-slate-500 text-xs font-semibold">
                     No register closeouts logged yet.
                   </td>
                 </tr>
@@ -348,12 +369,14 @@ export function DailyCheckout() {
       {/* DETAIL MODAL OVERLAY */}
       {selectedCheckout && (() => {
         const cash = parseFloat(selectedCheckout.total_cash_collected) || 0;
+        const mpesa = parseFloat(selectedCheckout.total_mpesa_collected || 0);
         const net = parseFloat(selectedCheckout.net_cash_position) || 0;
         const creditIssued = parseFloat(selectedCheckout.customer_credit_issued || 0);
         const supplierPayables = parseFloat(selectedCheckout.supplier_debt_created || 0);
         const isNetPositive = net >= 0;
         const totalExposure = creditIssued + supplierPayables;
-        const cashUtilization = cash > 0 ? Math.min(100, Math.round(((cash - totalExposure) / cash) * 100)) : 0;
+        const totalCollected = cash + mpesa;
+        const cashUtilization = totalCollected > 0 ? Math.min(100, Math.round(((totalCollected - totalExposure) / totalCollected) * 100)) : 0;
         
         return (
           <div 
@@ -419,6 +442,18 @@ export function DailyCheckout() {
                   </div>
                   <p className="text-xl font-black text-primary">{cash.toFixed(2)}</p>
                   <p className="text-[10px] font-bold text-slate-400">KES · Physical drawer</p>
+                </div>
+
+                {/* M-Pesa */}
+                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">M-Pesa</span>
+                    <div className="h-7 w-7 bg-emerald-50 rounded-xl flex items-center justify-center border border-emerald-100">
+                      <Wallet className="h-3.5 w-3.5 text-emerald-500" />
+                    </div>
+                  </div>
+                  <p className="text-xl font-black text-primary">{mpesa.toFixed(2)}</p>
+                  <p className="text-[10px] font-bold text-slate-400">KES · Mobile money</p>
                 </div>
 
                 {/* Cash Utilization */}
