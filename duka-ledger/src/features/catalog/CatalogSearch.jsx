@@ -2,6 +2,25 @@ import { useState } from 'react';
 import { useQuery } from '@powersync/react';
 import { Search as SearchIcon, X, Tag, Filter } from 'lucide-react';
 
+const PRICE_BADGE_DAYS = 5;
+
+const formatPrice = (value) => Number.parseFloat(value || 0).toFixed(2);
+
+const hasPreviousPrice = (item) => {
+  if (!item.previous_price) return false;
+  return formatPrice(item.previous_price) !== formatPrice(item.retail_price);
+};
+
+const isNewPrice = (changedAt) => {
+  if (!changedAt) return false;
+
+  const changedTime = new Date(changedAt).getTime();
+  if (Number.isNaN(changedTime)) return false;
+
+  const badgeWindowMs = PRICE_BADGE_DAYS * 24 * 60 * 60 * 1000;
+  return Date.now() - changedTime <= badgeWindowMs;
+};
+
 export function CatalogSearch() {
   const { data: categories } = useQuery(`SELECT * FROM categories ORDER BY category_name ASC`);
   const { data: items } = useQuery(`
@@ -118,14 +137,26 @@ export function CatalogSearch() {
                 <p className="text-[10px] text-slate-400 font-bold">Product ID: {item.id.slice(0, 8).toUpperCase()}</p>
               </div>
               
-              <div className="text-right space-y-0.5">
+              <div className="text-right space-y-1">
                 <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider flex items-center justify-end gap-1">
                   <Tag className="h-3 w-3 text-secondary" />
                   <span>Price</span>
                 </div>
-                <div className="text-base sm:text-lg font-black text-secondary tracking-tight">
-                  KES {parseFloat(item.retail_price).toFixed(2)}
+                <div className="flex items-center justify-end gap-2">
+                  {isNewPrice(item.price_changed_at) && (
+                    <span className="rounded-full border border-secondary/20 bg-secondary/10 px-2 py-0.5 text-[9px] font-black uppercase text-secondary-dark">
+                      new
+                    </span>
+                  )}
+                  <span className="text-base sm:text-lg font-black text-secondary tracking-tight">
+                    KES {formatPrice(item.retail_price)}
+                  </span>
                 </div>
+                {hasPreviousPrice(item) && (
+                  <div className="text-[11px] font-bold text-slate-400 line-through">
+                    KES {formatPrice(item.previous_price)}
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -134,4 +165,4 @@ export function CatalogSearch() {
 
     </div>
   );
-}
+};

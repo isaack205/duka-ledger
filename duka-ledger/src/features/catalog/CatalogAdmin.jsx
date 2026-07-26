@@ -2,7 +2,26 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@powersync/react';
 import { db } from '../../powersync/SetupPowerSync';
 import { useToast } from '../../context/ToastContext';
-import { Plus, Edit, Trash2, FolderPlus, ShoppingBag, DollarSign, Lock, Unlock, Delete } from 'lucide-react';
+import { Plus, Edit, Trash2, FolderPlus, ShoppingBag, DollarSign, Lock, Delete } from 'lucide-react';
+
+const PRICE_BADGE_DAYS = 5;
+
+const formatPrice = (value) => Number.parseFloat(value || 0).toFixed(2);
+
+const hasPreviousPrice = (item) => {
+  if (!item.previous_price) return false;
+  return formatPrice(item.previous_price) !== formatPrice(item.retail_price);
+};
+
+const isNewPrice = (changedAt) => {
+  if (!changedAt) return false;
+
+  const changedTime = new Date(changedAt).getTime();
+  if (Number.isNaN(changedTime)) return false;
+
+  const badgeWindowMs = PRICE_BADGE_DAYS * 24 * 60 * 60 * 1000;
+  return Date.now() - changedTime <= badgeWindowMs;
+};
 
 export function CatalogAdmin() {
   const toast = useToast();
@@ -139,10 +158,23 @@ export function CatalogAdmin() {
 
     try {
       if (editingItemId) {
-        await db.execute(
-          `UPDATE items SET category_id = ?, item_name = ?, retail_price = ?, updated_at = ? WHERE id = ?`,
-          [categoryId, name, price.toFixed(2), new Date().toISOString(), editingItemId]
-        );
+        const currentItem = items?.find((item) => item.id === editingItemId);
+        const nextPrice = price.toFixed(2);
+        const priceChanged = currentItem && formatPrice(currentItem.retail_price) !== nextPrice;
+        const now = new Date().toISOString();
+
+        if (priceChanged) {
+          await db.execute(
+            `UPDATE items SET category_id = ?, item_name = ?, retail_price = ?, previous_price = ?, price_changed_at = ?, updated_at = ? WHERE id = ?`,
+            [categoryId, name, nextPrice, formatPrice(currentItem.retail_price), now, now, editingItemId]
+          );
+        } else {
+          await db.execute(
+            `UPDATE items SET category_id = ?, item_name = ?, retail_price = ?, updated_at = ? WHERE id = ?`,
+            [categoryId, name, nextPrice, now, editingItemId]
+          );
+        }
+
         setEditingItemId(null);
         toast.success('Item Updated', `"${name}" details were updated successfully.`);
       } else {
@@ -422,8 +454,24 @@ export function CatalogAdmin() {
                         {item.category_name || 'Unassigned'}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 text-right text-primary font-extrabold tracking-tight">
-                      {parseFloat(item.retail_price).toFixed(2)} KES
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center justify-end gap-2">
+                          {isNewPrice(item.price_changed_at) && (
+                            <span className="rounded-full border border-secondary/20 bg-secondary/10 px-2 py-0.5 text-[9px] font-black uppercase text-secondary-dark">
+                              new
+                            </span>
+                          )}
+                          <span className="text-primary font-extrabold tracking-tight">
+                            {formatPrice(item.retail_price)} KES
+                          </span>
+                        </div>
+                        {hasPreviousPrice(item) && (
+                          <span className="text-[11px] font-bold text-slate-400 line-through">
+                            {formatPrice(item.previous_price)} KES
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3.5 px-4 text-center">
                       <div className="inline-flex gap-2">
@@ -460,4 +508,4 @@ export function CatalogAdmin() {
       </div>
     </div>
   );
-}
+};

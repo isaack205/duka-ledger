@@ -12,6 +12,8 @@ export const AppSchema = new Schema({
     category_id: column.text,
     item_name: column.text,
     retail_price: column.text, // NUMERIC values are stored as TEXT to prevent SQLite decimal rounding errors
+    previous_price: column.text,
+    price_changed_at: column.text,
     updated_at: column.text
   }),
 
