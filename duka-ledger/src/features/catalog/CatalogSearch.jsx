@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@powersync/react';
 import { Search as SearchIcon, X, Tag, Filter } from 'lucide-react';
+import { getSearchMatchScore } from './catalogSearchUtils';
 
 const PRICE_BADGE_DAYS = 5;
 
@@ -34,12 +35,28 @@ export function CatalogSearch() {
   const [selectedCategory, setSelectedCategory] = useState('All');
 
   // Live filter operations on local SQLite data array
-  const filteredItems = (items || []).filter((item) => {
-    const matchesSearch = item.item_name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory =
-      selectedCategory === 'All' || item.category_id === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const filteredItems = useMemo(() => {
+    return (items || [])
+      .map((item) => ({
+        item,
+        searchScore: getSearchMatchScore(item.item_name, searchTerm)
+      }))
+      .filter(({ item, searchScore }) => {
+        const matchesCategory =
+          selectedCategory === 'All' || item.category_id === selectedCategory;
+        return searchScore > 0 && matchesCategory;
+      })
+      .sort((a, b) => {
+        if (b.searchScore !== a.searchScore) return b.searchScore - a.searchScore;
+
+        const aHasNewPrice = isNewPrice(a.item.price_changed_at);
+        const bHasNewPrice = isNewPrice(b.item.price_changed_at);
+        if (aHasNewPrice !== bHasNewPrice) return bHasNewPrice - aHasNewPrice;
+
+        return a.item.item_name.localeCompare(b.item.item_name);
+      })
+      .map(({ item }) => item);
+  }, [items, searchTerm, selectedCategory]);
 
   return (
     <div className="space-y-6 mt-6 pb-12 animate-fade-in">

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@powersync/react';
 import { db } from '../../powersync/SetupPowerSync';
 import { useToast } from '../../context/ToastContext';
-import { Plus, Edit, Trash2, FolderPlus, ShoppingBag, DollarSign, Lock, Delete } from 'lucide-react';
+import { Plus, Edit, Trash2, FolderPlus, ShoppingBag, DollarSign, Lock, Delete, X } from 'lucide-react';
 
 const PRICE_BADGE_DAYS = 5;
 
@@ -109,6 +109,15 @@ export function CatalogAdmin() {
   const [categoryId, setCategoryId] = useState('');
   const [retailPrice, setRetailPrice] = useState('');
   const [editingItemId, setEditingItemId] = useState(null);
+  const [editModalItem, setEditModalItem] = useState(null);
+
+  const resetItemForm = () => {
+    setEditingItemId(null);
+    setEditModalItem(null);
+    setItemName('');
+    setCategoryId('');
+    setRetailPrice('');
+  };
 
   const handleAddCategory = async (e) => {
     e.preventDefault();
@@ -176,6 +185,7 @@ export function CatalogAdmin() {
         }
 
         setEditingItemId(null);
+        setEditModalItem(null);
         toast.success('Item Updated', `"${name}" details were updated successfully.`);
       } else {
         await db.execute(
@@ -194,13 +204,11 @@ export function CatalogAdmin() {
   };
 
   const handleEditItem = (item) => {
+    setEditModalItem(item);
     setEditingItemId(item.id);
     setItemName(item.item_name);
     setCategoryId(item.category_id || '');
     setRetailPrice(parseFloat(item.retail_price).toString());
-    
-    // Smooth scroll to top of form on mobile viewports
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDeleteItem = async (id) => {
@@ -350,7 +358,7 @@ export function CatalogAdmin() {
             <div className="flex items-center gap-2 mb-4">
               <ShoppingBag className="h-5 w-5 text-secondary" />
               <h3 className="text-sm sm:text-base font-extrabold text-primary tracking-tight">
-                {editingItemId ? 'Modify Item Info' : 'Register New Item'}
+                Register New Item
               </h3>
             </div>
 
@@ -401,26 +409,12 @@ export function CatalogAdmin() {
               </div>
 
               <div className="flex gap-2">
-                {editingItemId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingItemId(null);
-                      setItemName('');
-                      setCategoryId('');
-                      setRetailPrice('');
-                    }}
-                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                )}
                 <button
                   type="submit"
                   className="flex-2 w-full py-2.5 bg-primary hover:bg-primary-dark text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  {editingItemId ? <Edit className="h-4 w-4 text-secondary" /> : <Plus className="h-4 w-4 text-secondary" />}
-                  <span>{editingItemId ? 'Update Item' : 'Add Item'}</span>
+                  <Plus className="h-4 w-4 text-secondary" />
+                  <span>Add Item</span>
                 </button>
               </div>
             </form>
@@ -506,6 +500,98 @@ export function CatalogAdmin() {
         </div>
 
       </div>
+
+      {editModalItem && (
+        <div
+          onClick={resetItemForm}
+          className="fixed inset-0 z-50 bg-primary/45 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200/60 shadow-2xl overflow-hidden animate-zoom-in"
+          >
+            <div className="p-4 sm:p-5 border-b border-slate-100 bg-slate-50/50 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base sm:text-lg font-extrabold text-primary tracking-tight">Edit Product</h3>
+                <p className="text-xs text-slate-500 font-semibold mt-0.5 truncate max-w-[260px]">
+                  {editModalItem.item_name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={resetItemForm}
+                className="h-8 w-8 rounded-full text-slate-400 hover:text-slate-650 hover:bg-slate-100 flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveItem} className="p-4 sm:p-5 space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Parent Category</label>
+                <select
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition bg-white"
+                  required
+                >
+                  <option value="">-- Choose Category --</option>
+                  {categories?.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.category_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Item Variant Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Sunlight 10g, Coca Cola 300ml"
+                  value={itemName}
+                  onChange={(e) => setItemName(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Retail Selling Price</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 text-xs font-bold">KES</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={retailPrice}
+                    onChange={(e) => setRetailPrice(e.target.value)}
+                    className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={resetItemForm}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-primary hover:bg-primary-dark text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Edit className="h-4 w-4 text-secondary" />
+                  <span>Save Changes</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

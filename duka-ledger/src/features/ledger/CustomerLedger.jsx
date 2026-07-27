@@ -6,6 +6,7 @@ import { getCustomerSummaryData, normalizeQueryRows } from './customerLedgerUtil
 import CustomerInvoicePrint from './pdfTemplates/CustomerInvoicePrint';
 import { useOperators } from './operatorResolver';
 import { useToast } from '../../context/ToastContext';
+import { getSearchMatchScore, normalizeSearchText } from '../catalog/catalogSearchUtils';
 import { 
   Users, 
   UserPlus, 
@@ -88,11 +89,45 @@ export function CustomerLedger() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [cart, setCart] = useState([]);
   const [selectedItemId, setSelectedItemId] = useState('');
+  const [cartItemSearch, setCartItemSearch] = useState('');
+  const [showCartItemSuggestions, setShowCartItemSuggestions] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [upfrontPayment, setUpfrontPayment] = useState('');
   const [repaymentAmount, setRepaymentAmount] = useState('');
   const [notes, setNotes] = useState('');
   const [printInvoiceData, setPrintInvoiceData] = useState(null);
+
+  const filteredCartItems = useMemo(() => {
+    const normalizedSearch = normalizeSearchText(cartItemSearch);
+    if (!normalizedSearch) return itemRows;
+
+    return itemRows
+      .map((item) => ({
+        item,
+        searchScore: getSearchMatchScore(item.item_name, cartItemSearch)
+      }))
+      .filter(({ searchScore }) => searchScore > 0)
+      .sort((a, b) => {
+        if (b.searchScore !== a.searchScore) return b.searchScore - a.searchScore;
+        return a.item.item_name.localeCompare(b.item.item_name);
+      })
+      .map(({ item }) => item);
+  }, [cartItemSearch, itemRows]);
+
+  const selectedCartItem = useMemo(
+    () => itemRows.find((item) => item.id === selectedItemId),
+    [itemRows, selectedItemId]
+  );
+
+  const visibleCartSuggestions = normalizeSearchText(cartItemSearch)
+    ? filteredCartItems.slice(0, 8)
+    : [];
+
+  const handleSelectCartItem = (item) => {
+    setSelectedItemId(item.id);
+    setCartItemSearch(item.item_name);
+    setShowCartItemSuggestions(false);
+  };
 
   // Cart operations
   const handleAddToCart = () => {
@@ -109,6 +144,8 @@ export function CustomerLedger() {
       setCart([...cart, { ...item, quantity: parseInt(quantity, 10) }]);
     }
     setSelectedItemId('');
+    setCartItemSearch('');
+    setShowCartItemSuggestions(false);
     setQuantity(1);
   };
 
@@ -252,6 +289,9 @@ export function CustomerLedger() {
     setActiveModal(null);
     setModalCustomer('');
     setCart([]);
+    setSelectedItemId('');
+    setCartItemSearch('');
+    setShowCartItemSuggestions(false);
     setUpfrontPayment('');
     setRepaymentAmount('');
     setNotes('');
@@ -412,17 +452,58 @@ export function CustomerLedger() {
               <ShoppingCart className="h-4 w-4 text-slate-400" />
               <span>Assemble Cart Items</span>
             </span>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <select
-                value={selectedItemId}
-                onChange={(e) => setSelectedItemId(e.target.value)}
-                className="w-full sm:flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-primary font-semibold"
-              >
-                <option value="">Select Item</option>
-                {items?.map((item) => (
-                  <option key={item.id} value={item.id}>{item.item_name} ({item.retail_price} KES)</option>
-                ))}
-              </select>
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search item..."
+                  value={cartItemSearch}
+                  onFocus={() => setShowCartItemSuggestions(true)}
+                  onBlur={() => window.setTimeout(() => setShowCartItemSuggestions(false), 120)}
+                  onChange={(e) => {
+                    setCartItemSearch(e.target.value);
+                    setSelectedItemId('');
+                    setShowCartItemSuggestions(true);
+                  }}
+                  className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-primary font-semibold placeholder:text-slate-400"
+                />
+                {showCartItemSuggestions && cartItemSearch && (
+                  <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                    {visibleCartSuggestions.length > 0 ? (
+                      visibleCartSuggestions.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => handleSelectCartItem(item)}
+                          className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-slate-50 focus:bg-slate-50 focus:outline-none cursor-pointer"
+                        >
+                          <span className="w-full text-xs font-semibold leading-snug text-slate-700">{item.item_name}</span>
+                          <span className="text-[10px] font-bold text-secondary">{item.retail_price} KES</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-xs font-semibold text-slate-400">No matching items</div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={selectedItemId}
+                  onChange={(e) => {
+                    const item = itemRows.find((row) => row.id === e.target.value);
+                    setSelectedItemId(e.target.value);
+                    if (item) setCartItemSearch(item.item_name);
+                  }}
+                  className="w-full sm:flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-primary font-semibold"
+                >
+                  <option value="">{selectedCartItem?.item_name || (filteredCartItems.length ? 'Select Item' : 'No matching items')}</option>
+                  {filteredCartItems.map((item) => (
+                    <option key={item.id} value={item.id}>{item.item_name} ({item.retail_price} KES)</option>
+                  ))}
+                </select>
               <div className="flex gap-2 w-full sm:w-auto">
                 <input
                   type="number"
@@ -439,6 +520,7 @@ export function CustomerLedger() {
                   <Plus className="h-3 w-3 text-secondary" />
                   <span>Add</span>
                 </button>
+              </div>
               </div>
             </div>
 
@@ -945,17 +1027,58 @@ export function CustomerLedger() {
                       <ShoppingCart className="h-4 w-4 text-slate-400" />
                       <span>Assemble Cart Items</span>
                     </span>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <select
-                        value={selectedItemId}
-                        onChange={(e) => setSelectedItemId(e.target.value)}
-                        className="w-full sm:flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white font-semibold"
-                      >
-                        <option value="">Select Item</option>
-                        {items?.map((item) => (
-                          <option key={item.id} value={item.id}>{item.item_name} ({item.retail_price} KES)</option>
-                        ))}
-                      </select>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Search item..."
+                          value={cartItemSearch}
+                          onFocus={() => setShowCartItemSuggestions(true)}
+                          onBlur={() => window.setTimeout(() => setShowCartItemSuggestions(false), 120)}
+                          onChange={(e) => {
+                            setCartItemSearch(e.target.value);
+                            setSelectedItemId('');
+                            setShowCartItemSuggestions(true);
+                          }}
+                          className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-primary font-semibold placeholder:text-slate-400"
+                        />
+                        {showCartItemSuggestions && cartItemSearch && (
+                          <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                            {visibleCartSuggestions.length > 0 ? (
+                              visibleCartSuggestions.map((item) => (
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => handleSelectCartItem(item)}
+                                  className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-slate-50 focus:bg-slate-50 focus:outline-none cursor-pointer"
+                                >
+                                  <span className="w-full text-xs font-semibold leading-snug text-slate-700">{item.item_name}</span>
+                                  <span className="text-[10px] font-bold text-secondary">{item.retail_price} KES</span>
+                                </button>
+                              ))
+                            ) : (
+                              <div className="px-3 py-2 text-xs font-semibold text-slate-400">No matching items</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <select
+                          value={selectedItemId}
+                          onChange={(e) => {
+                            const item = itemRows.find((row) => row.id === e.target.value);
+                            setSelectedItemId(e.target.value);
+                            if (item) setCartItemSearch(item.item_name);
+                          }}
+                          className="w-full sm:flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white font-semibold"
+                        >
+                          <option value="">{selectedCartItem?.item_name || (filteredCartItems.length ? 'Select Item' : 'No matching items')}</option>
+                          {filteredCartItems.map((item) => (
+                            <option key={item.id} value={item.id}>{item.item_name} ({item.retail_price} KES)</option>
+                          ))}
+                        </select>
                       <div className="flex gap-2 w-full sm:w-auto">
                         <input
                            type="number"
@@ -972,6 +1095,7 @@ export function CustomerLedger() {
                           <Plus className="h-3.5 w-3.5 text-secondary" />
                           <span>Add</span>
                         </button>
+                      </div>
                       </div>
                     </div>
 
