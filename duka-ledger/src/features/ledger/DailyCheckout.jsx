@@ -32,12 +32,12 @@ export function DailyCheckout() {
   const todayStr = new Date().toISOString().split('T')[0];
 
   const { data: customerTransactions } = useQuery(`
-    SELECT * FROM customer_ledgers WHERE date(created_at) = date(?)
-  `, [todayStr]);
+    SELECT * FROM customer_ledgers ORDER BY created_at ASC
+  `);
 
   const { data: supplierTransactions } = useQuery(`
-    SELECT * FROM supplier_ledgers WHERE date(created_at) = date(?)
-  `, [todayStr]);
+    SELECT * FROM supplier_ledgers ORDER BY created_at ASC
+  `);
 
   const { data: pastCheckouts } = useQuery(`
     SELECT * FROM daily_checkouts 
@@ -82,16 +82,69 @@ export function DailyCheckout() {
   const todaysCheckout = pastCheckouts?.find(co => co.checkout_date === todayStr);
   const isRegisterClosedToday = !!todaysCheckout && !isEditingToday;
 
+  const getTransactionsByDate = (transactions, date) =>
+    (transactions || []).filter(t => t.created_at?.slice(0, 10) === date);
+
+  const getDailyDebtDetails = (transactions, date, nameKey, originalAmountKey) => {
+    const endOfDay = new Date(`${date}T23:59:59.999`);
+    const transactionsToDate = (transactions || [])
+      .filter(t => new Date(t.created_at) <= endOfDay)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    const debtsByName = transactionsToDate.reduce((groups, tx) => {
+      const name = tx[nameKey];
+      if (!name) return groups;
+      return {
+        ...groups,
+        [name]: [...(groups[name] || []), tx]
+      };
+    }, {});
+
+    return Object.values(debtsByName).flatMap((nameTransactions) => {
+      const debts = nameTransactions
+        .filter(t => t.transaction_type === 'debt')
+        .map(t => ({
+          ...t,
+          originalAmount: parseFloat(t[originalAmountKey] || t.net_debt_amount) || 0,
+          remainingBalance: parseFloat(t.net_debt_amount) || 0
+        }));
+      const repayments = nameTransactions.filter(t => t.transaction_type === 'repayment');
+      let repaymentPool = repayments.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.net_debt_amount) || 0), 0);
+
+      const processedDebts = debts.map((debt) => {
+        const appliedPayment = Math.min(repaymentPool, debt.remainingBalance);
+        repaymentPool -= appliedPayment;
+        const remainingBalance = Math.max(0, debt.remainingBalance - appliedPayment);
+        const status = remainingBalance === 0 ? 'Paid' : appliedPayment > 0 ? 'Partial' : 'Unpaid';
+
+        return {
+          name: debt[nameKey],
+          originalAmount: debt.originalAmount,
+          upfrontPaid: parseFloat(debt.amount_paid_upfront || 0) || 0,
+          remainingBalance,
+          status,
+          notes: debt.notes || '',
+          createdAt: debt.created_at
+        };
+      });
+
+      return processedDebts.filter(debt => debt.createdAt?.slice(0, 10) === date);
+    });
+  };
+
   const getTodayUnpaidDebts = () => {
-    const customerDebts = customerTransactions?.filter(t => t.transaction_type === 'debt') || [];
-    const customerRepayments = customerTransactions?.filter(t => t.transaction_type === 'repayment') || [];
+    const todayCustomerTransactions = getTransactionsByDate(customerTransactions, todayStr);
+    const todaySupplierTransactions = getTransactionsByDate(supplierTransactions, todayStr);
+
+    const customerDebts = todayCustomerTransactions.filter(t => t.transaction_type === 'debt');
+    const customerRepayments = todayCustomerTransactions.filter(t => t.transaction_type === 'repayment');
     
     const totalCustomerDebtCreated = customerDebts.reduce((sum, tx) => sum + (parseFloat(tx.net_debt_amount) || 0), 0);
     const totalCustomerRepaymentsToday = customerRepayments.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.net_debt_amount || 0)), 0);
     const customerDebtNotPaidToday = Math.max(0, totalCustomerDebtCreated - totalCustomerRepaymentsToday);
 
-    const supplierDebts = supplierTransactions?.filter(t => t.transaction_type === 'debt') || [];
-    const supplierRepayments = supplierTransactions?.filter(t => t.transaction_type === 'repayment') || [];
+    const supplierDebts = todaySupplierTransactions.filter(t => t.transaction_type === 'debt');
+    const supplierRepayments = todaySupplierTransactions.filter(t => t.transaction_type === 'repayment');
 
     const totalSupplierDebtCreated = supplierDebts.reduce((sum, tx) => sum + (parseFloat(tx.net_debt_amount) || 0), 0);
     const totalSupplierRepaymentsToday = supplierRepayments.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.net_debt_amount || 0)), 0);
@@ -101,6 +154,11 @@ export function DailyCheckout() {
   };
 
   const { customerDebtNotPaidToday, supplierDebtNotPaidToday } = getTodayUnpaidDebts();
+
+  const getCheckoutPrintDetails = (checkout) => ({
+    customerDebts: getDailyDebtDetails(customerTransactions, checkout.checkout_date, 'customer_name', 'total_item_value'),
+    supplierDebts: getDailyDebtDetails(supplierTransactions, checkout.checkout_date, 'supplier_name', 'total_invoice_value')
+  });
 
   const handleCloseRegister = async (e) => {
     e.preventDefault();
@@ -540,6 +598,7 @@ export function DailyCheckout() {
       <DailyCheckoutPrint
         checkout={printCheckout}
         operatorName={operators[printCheckout.recorded_by] || 'Unknown Operator'}
+        details={getCheckoutPrintDetails(printCheckout)}
       />
     )}
     </>

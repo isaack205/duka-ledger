@@ -113,13 +113,32 @@
 ──────────────────────────────────────────────────────────────── */
 @media print {
   body.printing-checkout * {
-    display: none !important;
     visibility: hidden !important;
+  }
+
+  body.printing-checkout #root,
+  body.printing-checkout #checkout-print-root {
+    display: block !important;
+    visibility: visible !important;
   }
 
   body.printing-checkout #checkout-print-root,
   body.printing-checkout #checkout-print-root * {
-    display: block !important;
     visibility: visible !important;
+  }
+
+  body.printing-checkout #checkout-print-root {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    z-index: 999999 !important;
+  }
+
+  body.printing-checkout .fixed:not(#checkout-print-root) {
+    display: none !important;
   }
 }
