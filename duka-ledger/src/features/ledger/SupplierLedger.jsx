@@ -23,7 +23,9 @@ import {
   ArrowUpRight,
   RotateCcw,
   Download,
-  Printer
+  Printer,
+  Package,
+  Trash2
 } from 'lucide-react';
 
 // Reusable CSV generator helper function
@@ -68,8 +70,59 @@ export function SupplierLedger() {
   const [upfrontPayment, setUpfrontPayment] = useState('');
   const [repaymentAmount, setRepaymentAmount] = useState('');
   const [notes, setNotes] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' or 'mpesa'
+
+  // Line-item state (pure UI — no DB columns added)
+  const [invoiceItems, setInvoiceItems] = useState([]);
 
   const netDebt = (parseFloat(totalInvoiceValue) || 0) - (parseFloat(upfrontPayment) || 0);
+
+  // ── Line-item helpers ──────────────────────────────────────────────────────
+  const newBlankItem = () => ({ id: crypto.randomUUID(), name: '', qty: '', unitPrice: '' });
+
+  const addInvoiceItem = () => setInvoiceItems(prev => [...prev, newBlankItem()]);
+
+  const removeInvoiceItem = (id) => setInvoiceItems(prev => prev.filter(i => i.id !== id));
+
+  const updateInvoiceItem = (id, field, value) =>
+    setInvoiceItems(prev => prev.map(i => i.id === id ? { ...i, [field]: value } : i));
+
+  const calcItemsTotal = (items) =>
+    items.reduce((sum, i) => {
+      const q = parseFloat(i.qty) || 0;
+      const p = parseFloat(i.unitPrice) || 0;
+      return sum + q * p;
+    }, 0);
+
+  const buildAutoNotes = (items) => {
+    const filled = items.filter(i => i.name.trim());
+    if (!filled.length) return '';
+    const lines = filled.map(i => {
+      const q = parseFloat(i.qty) || 1;
+      const p = parseFloat(i.unitPrice) || 0;
+      return `• ${i.name.trim()} × ${q} @ KES ${p.toFixed(2)} = KES ${(q * p).toFixed(2)}`;
+    });
+    const total = calcItemsTotal(filled);
+    return [...lines, '─────────────────────', `Items Total: KES ${total.toFixed(2)}`].join('\n');
+  };
+
+  // Auto-update total and notes whenever line items change
+  useEffect(() => {
+    if (!invoiceItems.length) return;
+    const total = calcItemsTotal(invoiceItems);
+    if (total > 0) setTotalInvoiceValue(total.toFixed(2));
+    setNotes(prev => {
+      const autoBlock = buildAutoNotes(invoiceItems);
+      // Find where user's free-form text begins (after the auto block separator)
+      const splitMarker = '─────────────────────';
+      const splitIdx = prev.lastIndexOf(splitMarker);
+      const userExtra = splitIdx !== -1
+        ? prev.slice(splitIdx + splitMarker.length).replace(/^\nItems Total:[^\n]*\n?/, '')
+        : (prev.startsWith('•') ? '' : prev);
+      return autoBlock + (userExtra.trim() ? '\n' + userExtra.trim() : '');
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceItems]);
 
   // Memoize to prevent new array ref every render (which causes infinite loop in useOperators)
   const allRecordedByIds = useMemo(
@@ -88,6 +141,7 @@ export function SupplierLedger() {
     
     const debts = supplierTx.filter(t => t.transaction_type === 'debt').map(d => ({ ...d, remaining: parseFloat(d.net_debt_amount) }));
     const repayments = supplierTx.filter(t => t.transaction_type === 'repayment');
+    const paidOnDelivery = supplierTx.filter(t => t.transaction_type === 'paid_on_delivery');
 
     const totalDebt = debts.reduce((sum, d) => sum + parseFloat(d.net_debt_amount), 0);
     const totalRepayed = repayments.reduce((sum, r) => sum + Math.abs(parseFloat(r.net_debt_amount)), 0);
@@ -110,7 +164,8 @@ export function SupplierLedger() {
 
     const historyTimeline = [
       ...processedDebts.map(d => ({ ...d, displayType: 'debt' })),
-      ...repayments.map(r => ({ ...r, displayType: 'repayment' }))
+      ...repayments.map(r => ({ ...r, displayType: 'repayment' })),
+      ...paidOnDelivery.map(p => ({ ...p, displayType: 'paid_on_delivery', remainingBalance: 0, isCleared: true }))
     ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     return { totalDebt, totalRepayed, remainingDebt, timeline: historyTimeline, phone: supplierTx[0]?.supplier_phone || '' };
@@ -129,10 +184,17 @@ export function SupplierLedger() {
     const upfrontVal = parseFloat(upfrontPayment) || 0;
     const initialNetDebt = invoiceVal - upfrontVal;
 
-    if (!newSupplierName.trim() || initialNetDebt <= 0) {
-      toast.error('Validation Error', 'Invoice amount minus upfront payment must create an outstanding debt.');
+    if (!newSupplierName.trim() || invoiceVal <= 0) {
+      toast.error('Validation Error', 'Invoice amount must be greater than zero.');
       return;
     }
+
+    if (initialNetDebt < 0) {
+      toast.error('Validation Error', 'Upfront payment cannot exceed total invoice value.');
+      return;
+    }
+
+    const txType = initialNetDebt === 0 ? 'paid_on_delivery' : 'debt';
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -146,10 +208,11 @@ export function SupplierLedger() {
           amount_paid_upfront, 
           net_debt_amount, 
           transaction_type, 
+          payment_method, 
           notes, 
           recorded_by, 
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           crypto.randomUUID(),
           newSupplierName.trim(),
@@ -157,8 +220,9 @@ export function SupplierLedger() {
           invoiceVal.toFixed(2),
           upfrontVal.toFixed(2),
           initialNetDebt.toFixed(2),
-          'debt',
-          notes.trim() || `First Supply Invoice.`,
+          txType,
+          upfrontVal > 0 ? paymentMethod : null,
+          notes.trim() || (txType === 'paid_on_delivery' ? 'First Cash Delivery.' : 'First Supply Invoice.'),
           session?.user?.id || null,
           new Date().toISOString()
         ]
@@ -170,23 +234,31 @@ export function SupplierLedger() {
       setTotalInvoiceValue('');
       setUpfrontPayment('');
       setNotes('');
+      setPaymentMethod('cash');
+      setInvoiceItems([]);
     } catch (err) {
       console.error('Failed to create new supplier record:', err);
       toast.error('Operation Failed', 'Could not save supplier invoice to local DB.');
     }
   };
 
-  // Database Inserts for existing suppliers
   const handleRecordDebt = async (e) => {
     e.preventDefault();
     const invoiceVal = parseFloat(totalInvoiceValue) || 0;
     const upfrontVal = parseFloat(upfrontPayment) || 0;
     const currentNetDebt = invoiceVal - upfrontVal;
 
-    if (!modalSupplier || currentNetDebt <= 0) {
-      toast.error('Validation Error', 'Net debt must be greater than zero.');
+    if (!modalSupplier || invoiceVal <= 0) {
+      toast.error('Validation Error', 'Invoice amount must be greater than zero.');
       return;
     }
+
+    if (currentNetDebt < 0) {
+      toast.error('Validation Error', 'Upfront payment cannot exceed total invoice value.');
+      return;
+    }
+
+    const txType = currentNetDebt === 0 ? 'paid_on_delivery' : 'debt';
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -200,10 +272,11 @@ export function SupplierLedger() {
           amount_paid_upfront, 
           net_debt_amount, 
           transaction_type, 
+          payment_method, 
           notes, 
           recorded_by, 
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           crypto.randomUUID(),
           modalSupplier,
@@ -211,13 +284,18 @@ export function SupplierLedger() {
           invoiceVal.toFixed(2),
           upfrontVal.toFixed(2),
           currentNetDebt.toFixed(2),
-          'debt',
-          notes.trim() || `Stock purchase invoice.`,
+          txType,
+          upfrontVal > 0 ? paymentMethod : null,
+          notes.trim() || (txType === 'paid_on_delivery' ? 'Cash delivery purchase.' : 'Stock purchase invoice.'),
           session?.user?.id || null,
           new Date().toISOString()
         ]
       );
-      toast.success('Invoice Added', `Recorded KES ${currentNetDebt.toFixed(2)} debt for ${modalSupplier}.`);
+      if (txType === 'paid_on_delivery') {
+        toast.success('Cash Purchase Recorded', `Recorded KES ${invoiceVal.toFixed(2)} cash delivery for ${modalSupplier}.`);
+      } else {
+        toast.success('Invoice Added', `Recorded KES ${currentNetDebt.toFixed(2)} debt for ${modalSupplier}.`);
+      }
       closeModal();
     } catch (err) {
       console.error(err);
@@ -249,10 +327,11 @@ export function SupplierLedger() {
           amount_paid_upfront, 
           net_debt_amount, 
           transaction_type, 
+          payment_method, 
           notes, 
           recorded_by, 
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           crypto.randomUUID(),
           modalSupplier,
@@ -261,6 +340,7 @@ export function SupplierLedger() {
           payment.toFixed(2),
           (-payment).toFixed(2),
           'repayment',
+          paymentMethod,
           notes.trim() || `Supplier repayment.`,
           session?.user?.id || null,
           new Date().toISOString()
@@ -311,9 +391,16 @@ export function SupplierLedger() {
   useEffect(() => {
     if (!printInvoiceData) return;
 
+    const originalTitle = document.title;
+    const cleanName = printInvoiceData.supplierName.replace(/\s+/g, '_');
+    document.title = `Supplier_Statement_${cleanName}_${new Date().toISOString().split('T')[0]}`;
+
     const timer = window.setTimeout(() => {
       window.print();
-      window.setTimeout(() => setPrintInvoiceData(null), 250);
+      window.setTimeout(() => {
+        document.title = originalTitle;
+        setPrintInvoiceData(null);
+      }, 250);
     }, 50);
 
     return () => window.clearTimeout(timer);
@@ -326,6 +413,8 @@ export function SupplierLedger() {
     setUpfrontPayment('');
     setRepaymentAmount('');
     setNotes('');
+    setPaymentMethod('cash');
+    setInvoiceItems([]);
     setTxFilter('all');
   };
 
@@ -386,8 +475,10 @@ export function SupplierLedger() {
           <h3 className="text-sm sm:text-base font-extrabold text-primary tracking-tight">Record New Supplier Invoice</h3>
         </div>
 
-        <form onSubmit={handleRegisterNewSupplier} className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-          <div className="space-y-3.5">
+        <form onSubmit={handleRegisterNewSupplier} className="space-y-5">
+
+          {/* Row 1: Name + Phone */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-[10px] font-bold text-slate-500 block mb-1">Supplier / Wholesaler Name</label>
               <input
@@ -411,9 +502,100 @@ export function SupplierLedger() {
             </div>
           </div>
 
-          <div className="space-y-3.5">
+          {/* Row 2: Line Items */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                <Package className="h-3 w-3" />
+                Invoice Items
+              </label>
+              <button
+                type="button"
+                onClick={addInvoiceItem}
+                className="text-[10px] font-bold text-primary hover:text-primary-dark flex items-center gap-0.5 px-2 py-1 bg-primary/5 hover:bg-primary/10 rounded-lg border border-primary/10 transition cursor-pointer"
+              >
+                <Plus className="h-3 w-3" />
+                Add Item
+              </button>
+            </div>
+
+            {invoiceItems.length > 0 && (
+              <div className="space-y-2 mb-2">
+                {/* Header row */}
+                <div className="hidden sm:grid grid-cols-[1fr_80px_100px_80px_28px] gap-2 px-1">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Item Name</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase text-center">Qty</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase text-center">Unit Price</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase text-right">Total</span>
+                  <span></span>
+                </div>
+                {invoiceItems.map((item) => {
+                  const rowTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.unitPrice) || 0);
+                  return (
+                    <div key={item.id} className="grid grid-cols-[1fr_80px_100px_80px_28px] gap-2 items-center">
+                      <input
+                        type="text"
+                        placeholder="e.g., Sugar 2kg"
+                        value={item.name}
+                        onChange={(e) => updateInvoiceItem(item.id, 'name', e.target.value)}
+                        className="px-2.5 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-primary placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        placeholder="1"
+                        value={item.qty}
+                        onChange={(e) => updateInvoiceItem(item.id, 'qty', e.target.value)}
+                        className="px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-primary text-center focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition"
+                      />
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-2 flex items-center text-slate-400 text-[10px] font-bold pointer-events-none">KES</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={item.unitPrice}
+                          onChange={(e) => updateInvoiceItem(item.id, 'unitPrice', e.target.value)}
+                          className="w-full pl-8 pr-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition"
+                        />
+                      </div>
+                      <span className="text-xs font-bold text-slate-600 text-right tabular-nums">
+                        {rowTotal > 0 ? rowTotal.toFixed(0) : '—'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeInvoiceItem(item.id)}
+                        className="flex items-center justify-center h-7 w-7 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition cursor-pointer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {invoiceItems.length === 0 && (
+              <button
+                type="button"
+                onClick={addInvoiceItem}
+                className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-400 hover:text-primary hover:border-primary/30 hover:bg-primary/5 transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Plus className="h-4 w-4" />
+                Click to add invoice items — or enter a lump total below
+              </button>
+            )}
+          </div>
+
+          {/* Row 3: Total Invoice + Amount Paid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-[10px] font-bold text-slate-500 block mb-1">Total Invoice Value</label>
+              <label className="text-[10px] font-bold text-slate-500 block mb-1">
+                Total Invoice Value
+                {invoiceItems.length > 0 && <span className="ml-1 text-primary/60 font-normal">(auto-calculated · read-only)</span>}
+              </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 text-xs font-bold">KES</span>
                 <input
@@ -422,7 +604,12 @@ export function SupplierLedger() {
                   placeholder="0.00"
                   value={totalInvoiceValue}
                   onChange={(e) => setTotalInvoiceValue(e.target.value)}
-                  className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+                  readOnly={invoiceItems.length > 0}
+                  className={`w-full pl-11 pr-4 py-2.5 border rounded-xl text-sm font-semibold text-primary focus:outline-none transition ${
+                    invoiceItems.length > 0
+                      ? 'bg-slate-50 border-slate-200 text-slate-500 cursor-not-allowed select-none'
+                      : 'border-slate-200 focus:ring-2 focus:ring-primary focus:border-transparent'
+                  }`}
                   required
                 />
               </div>
@@ -440,33 +627,51 @@ export function SupplierLedger() {
                   className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
                 />
               </div>
+              {parseFloat(upfrontPayment) > 0 && (
+                <div className="flex gap-1.5 mt-2">
+                  <button type="button" onClick={() => setPaymentMethod('cash')}
+                    className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                      paymentMethod === 'cash'
+                        ? 'bg-primary text-white border-primary shadow-sm'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                    }`}>💵 Cash</button>
+                  <button type="button" onClick={() => setPaymentMethod('mpesa')}
+                    className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                      paymentMethod === 'mpesa'
+                        ? 'bg-secondary text-white border-secondary shadow-sm'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                    }`}>📱 M-Pesa</button>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="space-y-3.5">
-            <div>
-              <label className="text-[10px] font-bold text-slate-500 block mb-1">Invoice Notes (Optional)</label>
-              <textarea
-                placeholder="Type specific details of supply purchase..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition h-[45px] resize-none"
-              />
-            </div>
-            {netDebt > 0 && (
-              <div className="p-3 bg-secondary/5 border border-secondary/10 rounded-xl text-xs text-secondary-dark flex justify-between font-bold shadow-inner">
-                <span>Invoice: {parseFloat(totalInvoiceValue).toFixed(2)} KES</span>
-                <span>Owed: {netDebt.toFixed(2)} KES</span>
-              </div>
-            )}
-            <button 
-              type="submit" 
-              className="w-full py-2.5 bg-primary hover:bg-primary-dark text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5"
-            >
-              <Plus className="h-4 w-4 text-secondary" />
-              <span>Log Supplier Record</span>
-            </button>
+          {/* Row 4: Notes (auto-generated + free-form merged) */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 block mb-1">Invoice Notes</label>
+            <textarea
+              placeholder={invoiceItems.length > 0 ? 'Items listed above — add any extra notes here...' : 'Type specific details of supply purchase...'}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition resize-none leading-relaxed"
+              rows={invoiceItems.length > 0 ? Math.max(4, invoiceItems.length + 3) : 2}
+            />
           </div>
+
+          {/* Summary strip + Submit */}
+          {parseFloat(totalInvoiceValue) > 0 && (
+            <div className="p-3 bg-secondary/5 border border-secondary/10 rounded-xl text-xs text-secondary-dark flex justify-between font-bold shadow-inner">
+              <span>Invoice: {parseFloat(totalInvoiceValue).toFixed(2)} KES</span>
+              <span>{netDebt === 0 ? 'Paid in Full (Cash) ✓' : `Owed: ${netDebt.toFixed(2)} KES`}</span>
+            </div>
+          )}
+          <button 
+            type="submit" 
+            className="w-full py-2.5 bg-primary hover:bg-primary-dark text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <Plus className="h-4 w-4 text-secondary" />
+            <span>Log Supplier Record</span>
+          </button>
         </form>
       </div>
 
@@ -795,9 +1000,10 @@ export function SupplierLedger() {
                             <tbody className="divide-y divide-slate-100 font-medium text-slate-600">
                               {filteredTimeline.map((line) => {
                                 const isDebt = line.displayType === 'debt';
+                                const isPOD = line.displayType === 'paid_on_delivery';
                                 return (
                                   <tr key={line.id} className="hover:bg-slate-50/40 transition">
-                                    <td className="py-3 px-4 text-slate-450 font-semibold">
+                                    <td className="py-3 px-4 text-slate-455 font-semibold">
                                       {new Date(line.created_at).toLocaleDateString(undefined, {
                                         month: 'short',
                                         day: 'numeric',
@@ -805,18 +1011,25 @@ export function SupplierLedger() {
                                       })}
                                     </td>
                                     <td className="py-3 px-4 max-w-[250px] truncate">
-                                      <div className="font-bold text-slate-800">{line.notes || (isDebt ? 'Supply Credit' : 'Payment')}</div>
+                                      <div className="font-bold text-slate-850">{line.notes || (isDebt ? 'Supply Credit' : isPOD ? 'Paid on Delivery' : 'Payment')}</div>
                                     </td>
                                     <td className="py-3 px-4">
                                       <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${
                                         isDebt 
                                           ? 'bg-rose-50 border-rose-100 text-rose-700' 
-                                          : 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                                          : isPOD
+                                            ? 'bg-blue-50 border-blue-100 text-blue-700'
+                                            : 'bg-emerald-50 border-emerald-100 text-emerald-700'
                                       }`}>
                                         {isDebt ? (
                                           <>
                                             <ArrowUpRight className="h-2.5 w-2.5" />
                                             <span>Invoice</span>
+                                          </>
+                                        ) : isPOD ? (
+                                          <>
+                                            <CheckCircle2 className="h-2.5 w-2.5 text-blue-500" />
+                                            <span>POD</span>
                                           </>
                                         ) : (
                                           <>
@@ -829,8 +1042,12 @@ export function SupplierLedger() {
                                     <td className="py-3 px-4 text-slate-450 font-semibold">
                                       {resolvedOperators[line.recorded_by] || '—'}
                                     </td>
-                                    <td className={`py-3 px-4 text-right font-bold text-sm ${isDebt ? 'text-slate-800' : 'text-emerald-600'}`}>
-                                      {isDebt ? `KES ${parseFloat(line.net_debt_amount).toFixed(2)}` : `- KES ${Math.abs(parseFloat(line.net_debt_amount)).toFixed(2)}`}
+                                    <td className={`py-3 px-4 text-right font-bold text-sm ${isDebt ? 'text-slate-800' : isPOD ? 'text-blue-600' : 'text-emerald-600'}`}>
+                                      {isPOD 
+                                        ? `KES ${parseFloat(line.total_invoice_value).toFixed(2)}`
+                                        : isDebt 
+                                          ? `KES ${parseFloat(line.net_debt_amount).toFixed(2)}` 
+                                          : `- KES ${Math.abs(parseFloat(line.net_debt_amount)).toFixed(2)}`}
                                     </td>
                                     <td className="py-3 px-4 text-right font-extrabold text-slate-455">
                                       {isDebt ? `KES ${line.remainingBalance.toFixed(2)}` : '—'}
@@ -846,16 +1063,21 @@ export function SupplierLedger() {
                         <div className="block sm:hidden relative pl-4 border-l border-slate-200/80 space-y-4 ml-2 mr-1">
                           {filteredTimeline.map((line) => {
                             const isDebt = line.displayType === 'debt';
+                            const isPOD = line.displayType === 'paid_on_delivery';
                             return (
                               <div key={line.id} className="relative">
                                 {/* Timeline Dot */}
                                 <div className={`absolute -left-[24px] top-1.5 h-4.5 w-4.5 rounded-full flex items-center justify-center border shadow-xs ${
                                   isDebt 
                                     ? 'bg-rose-50 border-rose-200 text-rose-600' 
-                                    : 'bg-emerald-50 border-emerald-200 text-emerald-600'
+                                    : isPOD
+                                      ? 'bg-blue-50 border-blue-200 text-blue-600'
+                                      : 'bg-emerald-50 border-emerald-200 text-emerald-600'
                                 }`}>
                                   {isDebt ? (
                                     <ArrowUpRight className="h-2.5 w-2.5" />
+                                  ) : isPOD ? (
+                                    <CheckCircle2 className="h-2.5 w-2.5" />
                                   ) : (
                                     <ArrowDownRight className="h-2.5 w-2.5" />
                                   )}
@@ -873,7 +1095,7 @@ export function SupplierLedger() {
                                         })}
                                       </span>
                                       <span className="text-xs font-bold text-slate-805 mt-0.5 block">
-                                        {line.notes || (isDebt ? 'Supply Credit' : 'Payment log')}
+                                        {line.notes || (isDebt ? 'Supply Credit' : isPOD ? 'Paid on Delivery' : 'Payment log')}
                                       </span>
                                       <div className="mt-1.5 flex items-center gap-1 text-[9px] font-bold text-slate-400">
                                         <span className="bg-slate-100/80 px-1.5 py-0.5 rounded border border-slate-200/20">
@@ -883,9 +1105,13 @@ export function SupplierLedger() {
                                     </div>
                                     <div className="text-right">
                                       <span className={`text-sm font-black block ${
-                                        isDebt ? 'text-slate-800' : 'text-secondary-dark'
+                                        isDebt ? 'text-slate-800' : isPOD ? 'text-blue-600' : 'text-secondary-dark'
                                       }`}>
-                                        {isDebt ? `KES ${parseFloat(line.net_debt_amount).toFixed(2)}` : `- KES ${Math.abs(parseFloat(line.net_debt_amount)).toFixed(2)}`}
+                                        {isPOD 
+                                          ? `KES ${parseFloat(line.total_invoice_value).toFixed(2)}`
+                                          : isDebt 
+                                            ? `KES ${parseFloat(line.net_debt_amount).toFixed(2)}` 
+                                            : `- KES ${Math.abs(parseFloat(line.net_debt_amount)).toFixed(2)}`}
                                       </span>
                                       {isDebt && (
                                         <span className="text-[9px] font-bold text-slate-400 block mt-0.5">
@@ -927,50 +1153,172 @@ export function SupplierLedger() {
               {/* NEW INVOICE DEBT FORM */}
               {activeModal === 'debt' && (
                 <form onSubmit={handleRecordDebt} className="space-y-4">
+
+                  {/* Line Items section */}
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Total Invoice Value</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={totalInvoiceValue}
-                      onChange={(e) => setTotalInvoiceValue(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount Paid Upfront</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={upfrontPayment}
-                      onChange={(e) => setUpfrontPayment(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
-                    />
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                        <Package className="h-3 w-3" />
+                        Invoice Items
+                      </label>
+                      <button
+                        type="button"
+                        onClick={addInvoiceItem}
+                        className="text-[10px] font-bold text-primary hover:text-primary-dark flex items-center gap-0.5 px-2 py-1 bg-primary/5 hover:bg-primary/10 rounded-lg border border-primary/10 transition cursor-pointer"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Add Item
+                      </button>
+                    </div>
+
+                    {invoiceItems.length > 0 && (
+                      <div className="space-y-2 mb-2">
+                        <div className="hidden sm:grid grid-cols-[1fr_70px_95px_75px_28px] gap-2 px-1">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase">Item Name</span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase text-center">Qty</span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase text-center">Unit Price</span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase text-right">Total</span>
+                          <span></span>
+                        </div>
+                        {invoiceItems.map((item) => {
+                          const rowTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.unitPrice) || 0);
+                          return (
+                            <div key={item.id} className="grid grid-cols-[1fr_70px_95px_75px_28px] gap-2 items-center">
+                              <input
+                                type="text"
+                                placeholder="e.g., Sugar 2kg"
+                                value={item.name}
+                                onChange={(e) => updateInvoiceItem(item.id, 'name', e.target.value)}
+                                className="px-2.5 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-primary placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition"
+                              />
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                placeholder="1"
+                                value={item.qty}
+                                onChange={(e) => updateInvoiceItem(item.id, 'qty', e.target.value)}
+                                className="px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-primary text-center focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition"
+                              />
+                              <div className="relative">
+                                <span className="absolute inset-y-0 left-2 flex items-center text-slate-400 text-[10px] font-bold pointer-events-none">KES</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="0.00"
+                                  value={item.unitPrice}
+                                  onChange={(e) => updateInvoiceItem(item.id, 'unitPrice', e.target.value)}
+                                  className="w-full pl-8 pr-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition"
+                                />
+                              </div>
+                              <span className="text-xs font-bold text-slate-600 text-right tabular-nums">
+                                {rowTotal > 0 ? rowTotal.toFixed(0) : '—'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeInvoiceItem(item.id)}
+                                className="flex items-center justify-center h-7 w-7 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {invoiceItems.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={addInvoiceItem}
+                        className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-400 hover:text-primary hover:border-primary/30 hover:bg-primary/5 transition cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Click to add invoice items — or enter a lump total below
+                      </button>
+                    )}
                   </div>
 
-                  {netDebt > 0 && (
+                  {/* Total Invoice + Upfront */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                        Total Invoice Value
+                        {invoiceItems.length > 0 && <span className="ml-1 text-primary/50 font-normal normal-case">(auto · read-only)</span>}
+                      </label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 text-xs font-bold">KES</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={totalInvoiceValue}
+                          onChange={(e) => setTotalInvoiceValue(e.target.value)}
+                          readOnly={invoiceItems.length > 0}
+                          className={`w-full pl-11 pr-3 py-2.5 border rounded-xl text-sm font-semibold focus:outline-none transition ${
+                            invoiceItems.length > 0
+                              ? 'bg-slate-50 border-slate-200 text-slate-500 cursor-not-allowed select-none'
+                              : 'text-primary border-slate-200 focus:ring-2 focus:ring-primary focus:border-transparent'
+                          }`}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount Paid Upfront</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 text-xs font-bold">KES</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={upfrontPayment}
+                          onChange={(e) => setUpfrontPayment(e.target.value)}
+                          className="w-full pl-11 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+                        />
+                      </div>
+                      {parseFloat(upfrontPayment) > 0 && (
+                        <div className="flex gap-1.5 mt-2">
+                          <button type="button" onClick={() => setPaymentMethod('cash')}
+                            className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                              paymentMethod === 'cash'
+                                ? 'bg-primary text-white border-primary shadow-sm'
+                                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                            }`}>💵 Cash</button>
+                          <button type="button" onClick={() => setPaymentMethod('mpesa')}
+                            className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                              paymentMethod === 'mpesa'
+                                ? 'bg-secondary text-white border-secondary shadow-sm'
+                                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                            }`}>📱 M-Pesa</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {parseFloat(totalInvoiceValue) > 0 && (
                     <div className="p-3 bg-secondary/5 border border-secondary/15 rounded-xl text-xs text-secondary-dark flex justify-between font-bold shadow-inner">
                       <span>Total Invoice: {parseFloat(totalInvoiceValue).toFixed(2)} KES</span>
-                      <span>Net Balance Owed: {netDebt.toFixed(2)} KES</span>
+                      <span>{netDebt === 0 ? 'Paid in Full (Cash) ✓' : `Net Balance Owed: ${netDebt.toFixed(2)} KES`}</span>
                     </div>
                   )}
 
+                  {/* Merged notes box */}
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Transaction Notes (Optional)</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Invoice Notes</label>
                     <textarea
-                      placeholder="Type details of supply purchase invoice..."
+                      placeholder={invoiceItems.length > 0 ? 'Items listed above — add any extra notes here...' : 'Type details of supply purchase invoice...'}
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition h-20 resize-none"
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition resize-none leading-relaxed"
+                      rows={invoiceItems.length > 0 ? Math.max(4, invoiceItems.length + 3) : 3}
                     />
                   </div>
                   
                   <button 
                     type="submit" 
-                    disabled={netDebt <= 0} 
+                    disabled={!totalInvoiceValue || parseFloat(totalInvoiceValue) <= 0 || netDebt < 0} 
                     className="w-full py-2.5 bg-accent hover:bg-accent-dark text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition duration-150 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle2 className="h-4 w-4" />
@@ -999,6 +1347,20 @@ export function SupplierLedger() {
                       className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
                       required
                     />
+                    <div className="flex gap-1.5 mt-2">
+                      <button type="button" onClick={() => setPaymentMethod('cash')}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                          paymentMethod === 'cash'
+                            ? 'bg-primary text-white border-primary shadow-sm'
+                            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                        }`}>💵 Cash</button>
+                      <button type="button" onClick={() => setPaymentMethod('mpesa')}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                          paymentMethod === 'mpesa'
+                            ? 'bg-secondary text-white border-secondary shadow-sm'
+                            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                        }`}>📱 M-Pesa</button>
+                    </div>
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Payment Log Notes (Optional)</label>

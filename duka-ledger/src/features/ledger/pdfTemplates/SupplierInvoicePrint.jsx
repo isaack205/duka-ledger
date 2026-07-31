@@ -77,26 +77,35 @@ export default function SupplierInvoicePrint({ invoiceData, supplierName, transa
           <tbody className="divide-y divide-slate-100 font-medium text-slate-600">
             {invoiceLines.map((line) => {
               const isDebt = line.displayType === 'debt';
+              const isPOD = line.displayType === 'paid_on_delivery';
               return (
                 <tr key={line.id} className="align-top odd:bg-slate-50/20">
                   <td className="py-3 px-4 text-slate-450">
                     {new Date(line.created_at).toLocaleDateString()}
                   </td>
                   <td className="py-3 px-4 text-slate-800">
-                    <div>{line.notes || (isDebt ? 'Supply Invoiced' : 'Payment offset')}</div>
+                    <div>{line.notes || (isDebt ? 'Supply Invoiced' : isPOD ? 'Paid on Delivery' : 'Payment offset')}</div>
                   </td>
                   <td className="py-3 px-4">
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-[9px] font-bold border ${
-                      isDebt ? 'bg-rose-50 border-rose-100 text-rose-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                      isDebt 
+                        ? 'bg-rose-50 border-rose-100 text-rose-700' 
+                        : isPOD
+                          ? 'bg-blue-50 border-blue-100 text-blue-700'
+                          : 'bg-emerald-50 border-emerald-100 text-emerald-700'
                     }`}>
-                      {isDebt ? 'Invoice' : 'Payment'}
+                      {isDebt ? 'Invoice' : isPOD ? 'POD' : 'Payment'}
                     </span>
                   </td>
                   <td className="py-3 px-4 text-slate-500 font-semibold">
                     {operators[line.recorded_by] || '—'}
                   </td>
-                  <td className={`py-3 px-4 text-right font-bold ${isDebt ? 'text-slate-800' : 'text-emerald-600'}`}>
-                    {isDebt ? `KES ${parseFloat(line.net_debt_amount).toFixed(2)}` : `- KES ${Math.abs(parseFloat(line.net_debt_amount)).toFixed(2)}`}
+                  <td className={`py-3 px-4 text-right font-bold ${isDebt ? 'text-slate-800' : isPOD ? 'text-blue-600' : 'text-emerald-600'}`}>
+                    {isPOD 
+                      ? `KES ${parseFloat(line.total_invoice_value).toFixed(2)}`
+                      : isDebt 
+                        ? `KES ${parseFloat(line.net_debt_amount).toFixed(2)}` 
+                        : `- KES ${Math.abs(parseFloat(line.net_debt_amount)).toFixed(2)}`}
                   </td>
                   <td className="py-3 px-4 text-right font-extrabold text-slate-450">
                     {isDebt ? `KES ${line.remainingBalance.toFixed(2)}` : '—'}

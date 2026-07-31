@@ -9,10 +9,18 @@ import {
   Info,
   Calendar,
   Eye,
-  EyeOff
+  EyeOff,
+  Store,
+  ArrowRight,
+  Search,
+  FileSpreadsheet
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { Link } from 'react-router-dom';
 
 export function DashboardOverview() {
+  const { user, isAdmin } = useAuth();
+  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Operator';
   const todayStr = new Date().toISOString().split('T')[0];
 
   // Toggle hiding/blurring financial metrics
@@ -201,33 +209,53 @@ export function DashboardOverview() {
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
 
-      const dayTxs = txs.filter(t => t.created_at.startsWith(dateStr));
+      const checkoutForDay = checkouts?.find(co => co.checkout_date === dateStr);
 
-      // Cash today = upfront payments + direct debt repayments
-      const cashCollected = dayTxs.reduce((sum, t) => {
-        const upfront = parseFloat(t.amount_paid_upfront || 0);
-        const repayment = t.transaction_type === 'repayment' ? Math.abs(parseFloat(t.net_debt_amount)) : 0;
-        return sum + upfront + repayment;
-      }, 0);
+      if (checkoutForDay) {
+        const cashRealized = parseFloat(checkoutForDay.total_cash_realized || 0);
+        const creditIssued = parseFloat(checkoutForDay.customer_credit_issued || 0);
+        const totalVolume = parseFloat(checkoutForDay.total_business_volume || 0);
+        const cashPercentage = totalVolume > 0 ? (cashRealized / totalVolume) * 100 : 100;
+        const creditPercentage = totalVolume > 0 ? (creditIssued / totalVolume) * 100 : 0;
 
-      // Credit today = actual unpaid balance issued
-      const creditIssued = dayTxs
-        .filter(t => t.transaction_type === 'debt')
-        .reduce((sum, t) => sum + (parseFloat(t.net_debt_amount) || 0), 0);
+        list.push({
+          dayLabel: d.toLocaleDateString(undefined, { weekday: 'short' }),
+          dateStr,
+          cashCollected: cashRealized,
+          creditIssued,
+          cashPercentage,
+          creditPercentage,
+          totalVolume
+        });
+      } else {
+        const dayTxs = txs.filter(t => t.created_at.startsWith(dateStr));
 
-      const totalVolume = cashCollected + creditIssued;
-      const cashPercentage = totalVolume > 0 ? (cashCollected / totalVolume) * 100 : 100;
-      const creditPercentage = totalVolume > 0 ? (creditIssued / totalVolume) * 100 : 0;
+        // Cash today = upfront payments + direct debt repayments
+        const cashCollected = dayTxs.reduce((sum, t) => {
+          const upfront = parseFloat(t.amount_paid_upfront || 0);
+          const repayment = t.transaction_type === 'repayment' ? Math.abs(parseFloat(t.net_debt_amount)) : 0;
+          return sum + upfront + repayment;
+        }, 0);
 
-      list.push({
-        dayLabel: d.toLocaleDateString(undefined, { weekday: 'short' }),
-        dateStr,
-        cashCollected,
-        creditIssued,
-        cashPercentage,
-        creditPercentage,
-        totalVolume
-      });
+        // Credit today = actual unpaid balance issued
+        const creditIssued = dayTxs
+          .filter(t => t.transaction_type === 'debt')
+          .reduce((sum, t) => sum + (parseFloat(t.net_debt_amount) || 0), 0);
+
+        const totalVolume = cashCollected + creditIssued;
+        const cashPercentage = totalVolume > 0 ? (cashCollected / totalVolume) * 100 : 100;
+        const creditPercentage = totalVolume > 0 ? (creditIssued / totalVolume) * 100 : 0;
+
+        list.push({
+          dayLabel: d.toLocaleDateString(undefined, { weekday: 'short' }),
+          dateStr,
+          cashCollected,
+          creditIssued,
+          cashPercentage,
+          creditPercentage,
+          totalVolume
+        });
+      }
     }
     return list;
   };
@@ -242,7 +270,10 @@ export function DashboardOverview() {
     return coDate.getMonth() === now.getMonth() && coDate.getFullYear() === now.getFullYear();
   }) || [];
 
-  const monthlyCashCollected = thisMonthCheckouts.reduce((sum, co) => sum + (parseFloat(co.total_cash_collected) || 0), 0);
+  const monthlyRevenue = thisMonthCheckouts.reduce((sum, co) => sum + (parseFloat(co.total_cash_realized) || 0), 0);
+  const monthlyOutflows = thisMonthCheckouts.reduce((sum, co) => sum + (parseFloat(co.supplier_cash_paid || 0) + parseFloat(co.supplier_mpesa_paid || 0)), 0);
+  const monthlyBusinessVolume = thisMonthCheckouts.reduce((sum, co) => sum + (parseFloat(co.total_business_volume) || 0), 0);
+  const monthlyNetRetained = monthlyRevenue - monthlyOutflows;
 
   const topDebtors = getCreditVelocity();
   const weeklyRatio = getWeeklyRatioData();
@@ -253,6 +284,96 @@ export function DashboardOverview() {
     month: 'long', 
     day: 'numeric' 
   });
+
+  if (!isAdmin) {
+    return (
+      <div className="space-y-8 mt-6 pb-12 animate-fade-in">
+        {/* OPERATOR WELCOME HEADER */}
+        <div className="bg-gradient-to-r from-primary to-slate-900 text-white p-8 rounded-2xl border border-slate-800/10 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="h-10 w-10 bg-white/10 rounded-xl flex items-center justify-center border border-white/10 shadow-inner">
+              <Store className="h-6 w-6 text-secondary" />
+            </div>
+            <h2 className="text-2xl font-extrabold tracking-tight">Welcome back, {displayName}!</h2>
+            <p className="text-sm text-slate-300 font-medium">Ready to record today's sales and balance customer ledgers?</p>
+          </div>
+          <div className="flex items-center gap-2 bg-white/10 border border-white/10 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-xs self-start md:self-auto">
+            <Activity className="h-4 w-4 text-secondary animate-pulse" />
+            <span>Operational Workspace Active</span>
+          </div>
+        </div>
+
+        {/* QUICK ACTIONS GRID */}
+        <div>
+          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Quick Workspaces</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            {/* Customer Ledger */}
+            <Link 
+              to="/customers" 
+              className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-xs hover:shadow-md transition duration-200 flex flex-col justify-between group"
+            >
+              <div className="space-y-4">
+                <div className="p-3 bg-secondary/5 rounded-xl text-secondary border border-secondary/10 w-fit">
+                  <Users className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-primary text-base group-hover:text-secondary transition">Customer Ledger</h4>
+                  <p className="text-xs text-slate-500 font-medium mt-1">Log customer credits, partial payments, and direct debt repayments.</p>
+                </div>
+              </div>
+              <div className="mt-6 pt-4 border-t border-slate-50 flex items-center justify-between text-xs font-bold text-secondary">
+                <span>Open Workspace</span>
+                <ArrowRight className="h-4 w-4 transform group-hover:translate-x-1 transition" />
+              </div>
+            </Link>
+
+            {/* Price Lookup */}
+            <Link 
+              to="/lookup" 
+              className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-xs hover:shadow-md transition duration-200 flex flex-col justify-between group"
+            >
+              <div className="space-y-4">
+                <div className="p-3 bg-slate-100 rounded-xl text-slate-600 border border-slate-200/40 w-fit">
+                  <Search className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-primary text-base group-hover:text-slate-600 transition">Price Lookup</h4>
+                  <p className="text-xs text-slate-500 font-medium mt-1">Look up and check active prices of shop items instantly.</p>
+                </div>
+              </div>
+              <div className="mt-6 pt-4 border-t border-slate-50 flex items-center justify-between text-xs font-bold text-slate-600">
+                <span>Search Catalog</span>
+                <ArrowRight className="h-4 w-4 transform group-hover:translate-x-1 transition" />
+              </div>
+            </Link>
+
+            {/* Register Closeout */}
+            <Link 
+              to="/checkout" 
+              className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-xs hover:shadow-md transition duration-200 flex flex-col justify-between group"
+            >
+              <div className="space-y-4">
+                <div className="p-3 bg-accent/5 rounded-xl text-accent border border-accent/10 w-fit">
+                  <FileSpreadsheet className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-primary text-base group-hover:text-accent transition">Register Closeout</h4>
+                  <p className="text-xs text-slate-500 font-medium mt-1">Reconcile cash and M-Pesa drawer counts at the end of your shift.</p>
+                </div>
+              </div>
+              <div className="mt-6 pt-4 border-t border-slate-50 flex items-center justify-between text-xs font-bold text-accent">
+                <span>Start Reconciliation</span>
+                <ArrowRight className="h-4 w-4 transform group-hover:translate-x-1 transition" />
+              </div>
+            </Link>
+
+          </div>
+        </div>
+
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 mt-6 pb-12 animate-fade-in">
@@ -334,25 +455,29 @@ export function DashboardOverview() {
           </div>
         </div>
 
-        {/* MONTHLY CASH RECONCILED */}
+        {/* MONTHLY SHOP PERFORMANCE */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-xs flex flex-col justify-between hover:shadow-md transition duration-200">
           <div className="flex justify-between items-start">
             <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">This Month's Cash</span>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">This Month's Revenue</span>
               <strong className="text-2xl font-extrabold text-secondary block mt-1 tracking-tight">
-                {renderValue(`${monthlyCashCollected.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} KES`)}
+                {renderValue(`${monthlyRevenue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} KES`)}
               </strong>
-              <span className="text-xs text-slate-400 font-semibold block mt-1">Physical register closes</span>
+              <span className="text-xs text-slate-400 font-semibold block mt-1">Total revenue (Cash + M-Pesa)</span>
             </div>
             <div className="p-2.5 bg-secondary/5 rounded-xl text-secondary border border-secondary/10">
               <Wallet className="h-5 w-5" />
             </div>
           </div>
-          <div className="mt-6 pt-4 border-t border-slate-100 text-xs font-semibold">
-            <span className="text-slate-400 block font-bold text-[10px] uppercase">Last Closeout ({latestCheckout?.checkout_date || 'None'})</span>
-            <strong className="text-slate-700 text-sm font-bold block mt-0.5">
-              {latestCheckout ? renderValue(`${parseFloat(latestCheckout.total_cash_collected).toLocaleString(undefined, {minimumFractionDigits: 2})} KES`) : 'No logs stored'}
-            </strong>
+          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 gap-4 text-xs font-semibold">
+            <div>
+              <span className="text-slate-400 block font-bold text-[10px] uppercase">Net Retained Cash</span>
+              <strong className="text-emerald-700 text-sm font-bold block mt-0.5">{renderValue(`${monthlyNetRetained.toFixed(2)} KES`)}</strong>
+            </div>
+            <div>
+              <span className="text-slate-400 block font-bold text-[10px] uppercase">Gross Business Vol</span>
+              <strong className="text-primary text-sm font-bold block mt-0.5">{renderValue(`${monthlyBusinessVolume.toFixed(2)} KES`)}</strong>
+            </div>
           </div>
         </div>
 

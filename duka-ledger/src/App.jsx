@@ -8,6 +8,7 @@ import { ToastProvider } from './context/ToastContext';
 
 import Layout from './components/common/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import AdminRoute from './components/AdminRoute';
 
 import LoginPage from './pages/LoginPage';
 import { DashboardOverview } from './features/dashboard/DashboardOverview';
@@ -16,6 +17,7 @@ import { SupplierLedger } from './features/ledger/SupplierLedger';
 import { DailyCheckout } from './features/ledger/DailyCheckout';
 import { CatalogAdmin } from './features/catalog/CatalogAdmin';
 import { CatalogSearch } from './features/catalog/CatalogSearch';
+import { ReportsDashboard } from './features/reports/ReportsDashboard';
 
 import { Loader2 } from 'lucide-react';
 
@@ -77,7 +79,12 @@ export default function App() {
                 <Route path="/suppliers" element={<SupplierLedger />} />
                 <Route path="/checkout" element={<DailyCheckout />} />
                 <Route path="/lookup" element={<CatalogSearch />} />
-                <Route path="/catalog" element={<CatalogAdmin />} />
+                
+                {/* ADMIN ONLY ROUTES */}
+                <Route element={<AdminRoute />}>
+                  <Route path="/reports" element={<ReportsDashboard />} />
+                  <Route path="/catalog" element={<CatalogAdmin />} />
+                </Route>
               </Route>
             </Route>
           </Routes>

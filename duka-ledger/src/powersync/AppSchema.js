@@ -26,6 +26,7 @@ export const AppSchema = new Schema({
     amount_paid_upfront: column.text,
     net_debt_amount: column.text,
     transaction_type: column.text,
+    payment_method: column.text, // 'cash' | 'mpesa' | null (null when no money changes hands)
     notes: column.text,
     recorded_by: column.text,
     created_at: column.text
@@ -39,6 +40,7 @@ export const AppSchema = new Schema({
     amount_paid_upfront: column.text,
     net_debt_amount: column.text,
     transaction_type: column.text,
+    payment_method: column.text, // 'cash' | 'mpesa' | null
     notes: column.text,
     recorded_by: column.text,
     created_at: column.text
@@ -46,11 +48,20 @@ export const AppSchema = new Schema({
 
   // 5. Daily Checkouts Table
   daily_checkouts: new Table({
+    // Section 1: Register & Till Count (manual)
     total_cash_collected: column.text,
     total_mpesa_collected: column.text,
+    // Section 2: Supplier Outflows (auto-calculated)
+    supplier_cash_paid: column.text,
+    supplier_mpesa_paid: column.text,
+    // Section 3: Credit/Debt Movements (auto-calculated)
     customer_credit_issued: column.text,
+    customer_debt_recovered: column.text,
     supplier_debt_created: column.text,
+    // Computed metrics
     net_cash_position: column.text,
+    total_cash_realized: column.text,
+    total_business_volume: column.text,
     checkout_date: column.text,
     notes: column.text,
     recorded_by: column.text,

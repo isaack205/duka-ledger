@@ -1,12 +1,18 @@
 export default function DailyCheckoutPrint({ checkout, operatorName, details }) {
   const cash = parseFloat(checkout.total_cash_collected) || 0;
-  const net = parseFloat(checkout.net_cash_position) || 0;
+  const mpesa = parseFloat(checkout.total_mpesa_collected || 0);
+  const subTotal = cash + mpesa;
+  const net = parseFloat(checkout.net_cash_position) || subTotal;
   const creditIssued = parseFloat(checkout.customer_credit_issued || 0);
   const supplierPayables = parseFloat(checkout.supplier_debt_created || 0);
-  const mpesa = parseFloat(checkout.total_mpesa_collected || 0);
-  const totalLiabilities = creditIssued + supplierPayables;
-  const subTotal = cash + mpesa;
+  const supplierCash = parseFloat(checkout.supplier_cash_paid || 0);
+  const supplierMpesa = parseFloat(checkout.supplier_mpesa_paid || 0);
+  const totalOutflows = supplierCash + supplierMpesa;
+  const debtRecovered = parseFloat(checkout.customer_debt_recovered || 0);
+  const totalRealized = parseFloat(checkout.total_cash_realized || (subTotal + totalOutflows));
+  const businessVolume = parseFloat(checkout.total_business_volume || (totalRealized + creditIssued));
   const isNetPositive = net >= 0;
+
   const customerDebts = details?.customerDebts || [];
   const supplierDebts = details?.supplierDebts || [];
 
@@ -264,7 +270,7 @@ export default function DailyCheckoutPrint({ checkout, operatorName, details }) 
                   Neema Gen Shop
                 </h1>
                 <p style={{ margin: '2px 0 0', fontSize: '10px', fontWeight: 800, color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                  Daily Register Reconciliation
+                  Daily 3-Section Register Reconciliation
                 </p>
               </div>
             </div>
@@ -294,42 +300,38 @@ export default function DailyCheckoutPrint({ checkout, operatorName, details }) 
               Net Position
             </p>
             <p style={{ margin: 0, fontSize: '30px', lineHeight: 1, fontWeight: 900, color: isNetPositive ? colors.green : colors.red }}>
-              {net >= 0 ? '+' : '-'}{fmt(Math.abs(net))}
+              {fmt(net)}
               <span style={{ fontSize: '11px', color: colors.muted, marginLeft: '6px' }}>KES</span>
             </p>
           </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', padding: '18px 0' }}>
-          <MetricCard label="Cash" value={fmt(cash)} tone="blue" />
-          <MetricCard label="M-Pesa" value={fmt(mpesa)} tone="positive" />
-          <MetricCard label="Credit" value={fmt(creditIssued)} tone="negative" />
-          <MetricCard label="Suppliers" value={fmt(supplierPayables)} tone="amber" />
+          <MetricCard label="Till Count" value={fmt(subTotal)} tone="blue" />
+          <MetricCard label="Outflows" value={fmt(totalOutflows)} tone="amber" />
+          <MetricCard label="Total Revenue" value={fmt(totalRealized)} tone="positive" />
+          <MetricCard label="Business Vol" value={fmt(businessVolume)} tone="neutral" />
         </div>
 
         <div style={section}>
-          <SectionTitle eyebrow="01 Summary" title="Cash Register Summary" />
+          <SectionTitle eyebrow="01 Breakdown" title="3-Section Register Close" />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
             <SummaryTable rows={[
-              { label: 'Physical Cash Counted', value: fmt(cash) },
-              { label: 'M-Pesa / Mobile', value: fmt(mpesa) },
-              { label: 'Sub-Total Received', value: fmt(subTotal), strong: true }
+              { label: 'Physical Cash Count', value: fmt(cash) },
+              { label: 'M-Pesa Till Balance', value: fmt(mpesa) },
+              { label: 'Till Count Subtotal', value: fmt(subTotal), strong: true },
+              { label: 'Supplier Cash Paid', value: fmt(supplierCash) },
+              { label: 'Supplier M-Pesa Paid', value: fmt(supplierMpesa) },
+              { label: 'Outflows Subtotal', value: fmt(totalOutflows), strong: true }
             ]} />
             <SummaryTable rows={[
-              { label: 'Customer Credit', value: `- ${fmt(creditIssued)}`, tone: 'negative' },
-              { label: 'Supplier Payables', value: `- ${fmt(supplierPayables)}`, tone: 'negative' },
-              { label: 'Total Liabilities', value: `- ${fmt(totalLiabilities)}`, tone: 'negative', strong: true }
+              { label: 'New Customer Debts', value: fmt(creditIssued), tone: 'negative' },
+              { label: 'Customer Debts Recovered', value: fmt(debtRecovered), tone: 'positive' },
+              { label: 'Supplier Invoices Created', value: fmt(supplierPayables) },
+              { label: 'Total Revenue Earned Today', value: fmt(totalRealized), tone: 'positive', strong: true },
+              { label: 'Total Business Volume', value: fmt(businessVolume), strong: true }
             ]} />
           </div>
-        </div>
-
-        <div style={section}>
-          <SectionTitle eyebrow="02 Position" title="Net Cash Position" />
-          <MetricCard
-            label="Final Position"
-            value={`${net >= 0 ? '+' : '-'}${fmt(Math.abs(net))}`}
-            tone={isNetPositive ? 'positive' : 'negative'}
-          />
         </div>
 
         <div style={section}>

@@ -95,6 +95,7 @@ export function CustomerLedger() {
   const [upfrontPayment, setUpfrontPayment] = useState('');
   const [repaymentAmount, setRepaymentAmount] = useState('');
   const [notes, setNotes] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' or 'mpesa'
   const [printInvoiceData, setPrintInvoiceData] = useState(null);
 
   const filteredCartItems = useMemo(() => {
@@ -178,8 +179,8 @@ export function CustomerLedger() {
       await db.execute(
         `INSERT INTO customer_ledgers (
           id, customer_name, customer_phone, item_id, total_item_value, 
-          amount_paid_upfront, net_debt_amount, transaction_type, notes, recorded_by, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          amount_paid_upfront, net_debt_amount, transaction_type, payment_method, notes, recorded_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           crypto.randomUUID(),
           newCustomerName.trim(),
@@ -189,6 +190,7 @@ export function CustomerLedger() {
           upfront.toFixed(2),
           netDebt.toFixed(2),
           'debt',
+          upfront > 0 ? paymentMethod : null,
           notes.trim() || `First Debt Assignment: ${cartDetails}.`,
           session?.user?.id || null,
           new Date().toISOString()
@@ -201,6 +203,7 @@ export function CustomerLedger() {
       setCart([]);
       setUpfrontPayment('');
       setNotes('');
+      setPaymentMethod('cash');
     } catch (err) {
       console.error('Failed to create new customer debt:', err);
       toast.error('Operation Failed', 'Could not open credit record in local database.');
@@ -219,8 +222,8 @@ export function CustomerLedger() {
       await db.execute(
         `INSERT INTO customer_ledgers (
           id, customer_name, customer_phone, item_id, total_item_value, 
-          amount_paid_upfront, net_debt_amount, transaction_type, notes, recorded_by, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          amount_paid_upfront, net_debt_amount, transaction_type, payment_method, notes, recorded_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           crypto.randomUUID(),
           modalCustomer,
@@ -230,6 +233,7 @@ export function CustomerLedger() {
           upfront.toFixed(2),
           netDebt.toFixed(2),
           'debt',
+          upfront > 0 ? paymentMethod : null,
           notes.trim() || `Purchased: ${cartDetails}.`,
           session?.user?.id || null,
           new Date().toISOString()
@@ -261,8 +265,8 @@ export function CustomerLedger() {
       await db.execute(
         `INSERT INTO customer_ledgers (
           id, customer_name, customer_phone, item_id, total_item_value, 
-          amount_paid_upfront, net_debt_amount, transaction_type, notes, recorded_by, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          amount_paid_upfront, net_debt_amount, transaction_type, payment_method, notes, recorded_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           crypto.randomUUID(),
           modalCustomer,
@@ -272,6 +276,7 @@ export function CustomerLedger() {
           payment.toFixed(2),
           (-payment).toFixed(2),
           'repayment',
+          paymentMethod,
           notes.trim() || `Debt repayment.`,
           session?.user?.id || null,
           new Date().toISOString()
@@ -295,6 +300,7 @@ export function CustomerLedger() {
     setUpfrontPayment('');
     setRepaymentAmount('');
     setNotes('');
+    setPaymentMethod('cash');
     setTxFilter('all');
   };
 
@@ -346,9 +352,16 @@ export function CustomerLedger() {
   useEffect(() => {
     if (!printInvoiceData) return;
 
+    const originalTitle = document.title;
+    const cleanName = printInvoiceData.customerName.replace(/\s+/g, '_');
+    document.title = `Customer_Statement_${cleanName}_${new Date().toISOString().split('T')[0]}`;
+
     const timer = window.setTimeout(() => {
       window.print();
-      window.setTimeout(() => setPrintInvoiceData(null), 250);
+      window.setTimeout(() => {
+        document.title = originalTitle;
+        setPrintInvoiceData(null);
+      }, 250);
     }, 50);
 
     return () => window.clearTimeout(timer);
@@ -557,6 +570,22 @@ export function CustomerLedger() {
                 onChange={(e) => setUpfrontPayment(e.target.value)}
                 className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
               />
+              {upfront > 0 && (
+                <div className="flex gap-1.5 mt-2">
+                  <button type="button" onClick={() => setPaymentMethod('cash')}
+                    className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                      paymentMethod === 'cash'
+                        ? 'bg-primary text-white border-primary shadow-sm'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                    }`}>💵 Cash</button>
+                  <button type="button" onClick={() => setPaymentMethod('mpesa')}
+                    className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                      paymentMethod === 'mpesa'
+                        ? 'bg-secondary text-white border-secondary shadow-sm'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                    }`}>📱 M-Pesa</button>
+                </div>
+              )}
             </div>
             {cart.length > 0 && (
               <div className="p-3 bg-secondary/5 border border-secondary/10 rounded-xl text-xs text-secondary-dark flex justify-between font-bold shadow-inner">
@@ -1130,6 +1159,22 @@ export function CustomerLedger() {
                       onChange={(e) => setUpfrontPayment(e.target.value)}
                       className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
                     />
+                    {upfront > 0 && (
+                      <div className="flex gap-1.5 mt-2">
+                        <button type="button" onClick={() => setPaymentMethod('cash')}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                            paymentMethod === 'cash'
+                              ? 'bg-primary text-white border-primary shadow-sm'
+                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                          }`}>💵 Cash</button>
+                        <button type="button" onClick={() => setPaymentMethod('mpesa')}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                            paymentMethod === 'mpesa'
+                              ? 'bg-secondary text-white border-secondary shadow-sm'
+                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                          }`}>📱 M-Pesa</button>
+                      </div>
+                    )}
                   </div>
 
                   {cart.length > 0 && (
@@ -1180,6 +1225,20 @@ export function CustomerLedger() {
                       className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
                       required
                     />
+                    <div className="flex gap-1.5 mt-2">
+                      <button type="button" onClick={() => setPaymentMethod('cash')}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                          paymentMethod === 'cash'
+                            ? 'bg-primary text-white border-primary shadow-sm'
+                            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                        }`}>💵 Cash</button>
+                      <button type="button" onClick={() => setPaymentMethod('mpesa')}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                          paymentMethod === 'mpesa'
+                            ? 'bg-secondary text-white border-secondary shadow-sm'
+                            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                        }`}>📱 M-Pesa</button>
+                    </div>
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Payment Log Notes (Optional)</label>

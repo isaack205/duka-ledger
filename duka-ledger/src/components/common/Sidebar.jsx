@@ -1,17 +1,27 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, Package, FileSpreadsheet, Search, Settings, Store } from 'lucide-react';
+import { LayoutDashboard, Users, Package, FileSpreadsheet, Search, Settings, Store, BarChart3 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export function Sidebar({ isMobile, onClose }) {
   const location = useLocation();
+  const { isAdmin } = useAuth();
 
   const navItems = [
     { name: 'Dashboard', path: '/home', icon: LayoutDashboard },
     { name: 'Customer Ledger', path: '/customers', icon: Users },
     { name: 'Supplier Ledger', path: '/suppliers', icon: Package },
     { name: 'Daily Closeout', path: '/checkout', icon: FileSpreadsheet },
+    { name: 'Business Reports', path: '/reports', icon: BarChart3 },
     { name: 'Price Lookup', path: '/lookup', icon: Search },
     { name: 'Manage Catalog', path: '/catalog', icon: Settings },
   ];
+
+  const allowedItems = navItems.filter(item => {
+    if (item.path === '/reports' || item.path === '/catalog') {
+      return isAdmin;
+    }
+    return true;
+  });
 
   const handleLinkClick = () => {
     if (isMobile && onClose) {
@@ -37,7 +47,7 @@ export function Sidebar({ isMobile, onClose }) {
 
       {/* Nav items container */}
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-hide">
-        {navItems.map((item) => {
+        {allowedItems.map((item) => {
           const isActive = location.pathname === item.path;
           const Icon = item.icon;
           return (
