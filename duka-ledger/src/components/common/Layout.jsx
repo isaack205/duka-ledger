@@ -3,15 +3,14 @@ import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useStatus } from '@powersync/react';
 import { supabase } from '../../supabase/supabaseClient';
 import { Sidebar } from './Sidebar';
-import { useAutoCheckout } from '../../features/ledger/useAutoCheckout';
+
 import { Menu, X, Database, Wifi, WifiOff, LogOut, Store, ChevronDown, Calendar } from 'lucide-react';
 
 export default function Layout() {
   const navigate = useNavigate();
   const status = useStatus();
 
-  // Run auto checkout check globally in background
-  useAutoCheckout();
+
   
   // App state hooks
   const [isOnline, setIsOnline] = useState(navigator.onLine);
